@@ -662,7 +662,9 @@ def assign_recommendations(rows: list) -> None:
         if rule == "trend":
             continue                       # r['rec'] already = EMA zone
         # cross-sectional signal within the market
-        key = {"revert": "d5", "mom_st": "d5", "mom126": "d5"}.get(rule, "d5")
+        # Horizon must match the rule backtest_zone_rules.py selected:
+        # revert = 5d, mom_st = 21d, mom126 = 126d. All three used d5 before.
+        key = {"revert": "d5", "mom_st": "d21", "mom126": "d126"}.get(rule, "d5")
         vals = [(r, r.get(key)) for r in grp if r.get(key) is not None]
         if len(vals) < 6:
             continue
@@ -870,7 +872,7 @@ def build_rows(watchlist: pd.DataFrame, frames_out: Optional[dict] = None) -> li
             # coverage gap worth seeing — dropping it makes the digest look
             # complete while quietly omitting exactly what you asked about.
             rows.append({"symbol": sym, "market": mkt, "mark": "❔", "d1": None,
-                         "d5": None, "close": None, "last": None,
+                         "d5": None, "d21": None, "d126": None, "close": None, "last": None,
                          "note": note, "status": status, "missing": True,
                          "liq": "?", "below_floor": False,
                          "why": why_listed(status, note),
@@ -909,7 +911,8 @@ def build_rows(watchlist: pd.DataFrame, frames_out: Optional[dict] = None) -> li
             except Exception:
                 pass
         rows.append({"symbol": sym, "market": mkt, "mark": classify(d1), "d1": d1,
-                     "d5": _pct_change(df, 5), "close": last_close,
+                     "d5": _pct_change(df, 5), "d21": _pct_change(df, 21),
+                     "d126": _pct_change(df, 126), "close": last_close,
                      "last": last_date, "note": note, "status": status,
                      "missing": False, "liq": liq, "below_floor": below,
                      "turn_usd": turn,
