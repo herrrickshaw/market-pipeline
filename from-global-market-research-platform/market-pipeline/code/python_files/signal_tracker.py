@@ -244,8 +244,10 @@ def record() -> int:
     old = pd.read_parquet(LEDGER) if LEDGER.exists() else pd.DataFrame()
     if not old.empty:
         # Idempotent per day: re-running must not duplicate or re-stamp. An
-        # existing (symbol, filter, date) row is left exactly as first written.
-        key = ["symbol", "filter", "signal_date"]
+        # existing (symbol, market, filter, date) row is left exactly as first
+        # written. market is part of the key: a bare symbol is not an
+        # instrument (INFY is both an NSE stock and a NYSE ADR).
+        key = ["symbol", "market", "filter", "signal_date"]
         merged = pd.concat([old, new], ignore_index=True)
         before = len(merged)
         merged = merged.drop_duplicates(subset=key, keep="first")
