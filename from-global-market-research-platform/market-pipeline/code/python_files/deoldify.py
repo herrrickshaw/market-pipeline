@@ -9,20 +9,20 @@ Original file is located at
 
 # Commented out IPython magic to ensure Python compatibility.
 # Clone deoldify Repository
-! git clone https://github.com/jantic/DeOldify DeOldify
+# ! git clone https://github.com/jantic/DeOldify DeOldify
 
 # change directory to DeOldify Repo
 # %cd DeOldify
 
 # For Colab
-!pip install -r colab_requirements.txt
-!pip install deoldify
+# !pip install -r colab_requirements.txt
+# !pip install deoldify
 # For Local Script
-! pip install -r requirements.txt
-! pip install fastai==1.0.61
-! pip install fastprogress==0.2.7
-! pip install torch==1.7.0
-! pip install torchvision==0.8.1
+# ! pip install -r requirements.txt
+# ! pip install fastai==1.0.61
+# ! pip install fastprogress==0.2.7
+# ! pip install torch==1.7.0
+# ! pip install torchvision==0.8.1
 
 
 # import pytorch library
@@ -43,8 +43,8 @@ import warnings
 warnings.filterwarnings("ignore",
                         category=UserWarning, message=".*?Your .*? set is empty.*?")
 # download the artistic model
-!mkdir 'models'
-!wget https://data.deepai.org/deoldify/ColorizeArtistic_gen.pth -O ./models/ColorizeArtistic_gen.pth
+# !mkdir 'models'
+# !wget https://data.deepai.org/deoldify/ColorizeArtistic_gen.pth -O ./models/ColorizeArtistic_gen.pth
 
 # use the get image colorizer function with artistic model
 colorizer = get_image_colorizer(artistic=True)
