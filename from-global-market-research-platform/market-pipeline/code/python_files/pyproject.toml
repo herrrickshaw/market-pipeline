@@ -53,3 +53,9 @@ ignore-imports = true
 [tool.bandit]
 # `make security` -- exclude generated/data directories, not source code.
 exclude_dirs = [".venv", "cache_seed", "docs_cache"]
+
+[tool.pytest.ini_options]
+# Only the offline unit tests. The test_*.py scripts at the top level of this
+# directory (test_screener_in.py etc.) are live-site probes, not pytest tests,
+# and must never be collected by a bare `pytest`.
+testpaths = ["tests"]
