@@ -111,7 +111,7 @@ def signals(w: pd.DataFrame) -> dict:
 
     def terc(r):
         p = r.rank(axis=1, pct=True)
-        return (p >= 1 - TERCILE).astype(int) - (p <= TERCILE).astype(int)
+        return (p >= 2 * TERCILE).astype(int) - (p <= TERCILE).astype(int)
 
     return {
         "trend":  ((w > ema20) & (ema20 > ema50)).astype(int) - (w < ema50).astype(int),

@@ -77,7 +77,7 @@ def zone_signals(w: pd.DataFrame) -> dict:
 
     def tercile_sig(r):
         lo = r.rank(axis=1, pct=True)
-        return (lo >= 1 - TERCILE).astype(int) - (lo <= TERCILE).astype(int)
+        return (lo >= 2 * TERCILE).astype(int) - (lo <= TERCILE).astype(int)
 
     trend = ((w > ema20) & (ema20 > ema50)).astype(int) - (w < ema50).astype(int)
     revert = -tercile_sig(r5)          # oversold → BUY: invert
