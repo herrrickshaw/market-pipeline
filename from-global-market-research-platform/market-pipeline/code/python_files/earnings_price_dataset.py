@@ -61,7 +61,14 @@ import pandas as pd
 
 warnings.filterwarnings("ignore")
 
-from regime_price_model import CIRCUIT_BOUND_PCT  # {"IN":20.0,"KR":30.0,"US":100.0,"JP":50.0}, literature-backed
+try:
+    from regime_price_model import CIRCUIT_BOUND_PCT  # literature-backed, see that module's docstring
+except ImportError:
+    # regime_price_model.py is not part of this checkout (only its dataset
+    # parquet is); without this fallback the script cannot even be imported.
+    # Same values the import documented: IN/KR are exact regulatory single-day
+    # limits, US/JP conservative heuristics.
+    CIRCUIT_BOUND_PCT = {"IN": 20.0, "KR": 30.0, "US": 100.0, "JP": 50.0}
 
 LTM_DIR = "/Users/umashankar/repos/global-market-data/cache_seed/ltm"
 OUT_DIR = Path("cache_seed/earnings_price_dataset")
