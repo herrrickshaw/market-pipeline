@@ -49,10 +49,16 @@ def deflated_sharpe(sr, n_trials, n_obs, skew=0.0, kurt=3.0, sr_var=None):
     cite only DSR > 0.95."""
     if sr_var is None:
         sr_var = (1 - skew * sr + (kurt - 1) / 4 * sr**2) / (n_obs - 1)
-    emc = 0.5772156649
-    max_z = (1 - emc) * stats.norm.ppf(1 - 1.0 / n_trials) \
-        + emc * stats.norm.ppf(1 - 1.0 / (n_trials * math.e))
-    sr0 = math.sqrt(sr_var) * max_z
+    if n_trials <= 1:
+        # One trial = no selection: the benchmark is SR*=0 (plain PSR).
+        # ppf(0) = -inf here made sr0 = -inf and every Sharpe, even a
+        # negative one, score DSR = 1.0.
+        sr0 = 0.0
+    else:
+        emc = 0.5772156649
+        max_z = (1 - emc) * stats.norm.ppf(1 - 1.0 / n_trials) \
+            + emc * stats.norm.ppf(1 - 1.0 / (n_trials * math.e))
+        sr0 = math.sqrt(sr_var) * max_z
     return stats.norm.cdf((sr - sr0) * math.sqrt(n_obs - 1)
                           / math.sqrt(1 - skew * sr + (kurt - 1) / 4 * sr**2))
 
