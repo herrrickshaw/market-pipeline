@@ -227,41 +227,44 @@ class MarketCache:
             self._mem[ticker] = df
             return df
 
-        if path.exists() and not force:
+        # A Parquet file with no last-bar date in the meta index (index lost,
+        # or written by an older version) cannot be updated incrementally; it
+        # used to fall off the end of this method and return None, which every
+        # caller then dereferenced (`.empty`). Treat it as a cold start instead.
+        last_date = self._last_cached_date(key) if (path.exists() and not force) else None
+        if last_date:
             # Cache exists but may be stale — incremental update
-            existing  = pd.read_parquet(path)
-            last_date = self._last_cached_date(key)
-            if last_date:
-                # Only fetch from the day after last cached date
-                start = last_date + timedelta(days=1)
-                if start >= date.today():
-                    # Nothing to fetch — already up to date
-                    return existing
-                new_df = self._yf_download_single(ticker, start=start)
-                if not new_df.empty:
-                    combined = pd.concat([existing, new_df]).sort_index()
-                    combined = combined[~combined.index.duplicated(keep="last")]
-                    combined = self._clean_ohlc(combined)
-                    self._write_parquet(path, combined)
-                    self._update_meta(key, path, combined)
-                    if self.verbose:
-                        print(f"  Cache updated: {ticker} +{len(new_df)} rows "
-                              f"(total {len(combined)})")
-                    return combined
+            existing = pd.read_parquet(path)
+            # Only fetch from the day after last cached date
+            start = last_date + timedelta(days=1)
+            if start >= date.today():
+                # Nothing to fetch — already up to date
                 return existing
-        else:
-            # Cold start — download full history
-            start = date.today() - timedelta(days=OHLC_YEARS * 365 + 30)
-            df    = self._yf_download_single(ticker, start=start)
-            if df.empty:
-                return df
-            df = self._clean_ohlc(df)
-            self._write_parquet(path, df)
-            self._update_meta(key, path, df)
-            if self.verbose:
-                print(f"  Cache created: {ticker} {len(df)} rows "
-                      f"({df.index.min().date()} – {df.index.max().date()})")
+            new_df = self._yf_download_single(ticker, start=start)
+            if not new_df.empty:
+                combined = pd.concat([existing, new_df]).sort_index()
+                combined = combined[~combined.index.duplicated(keep="last")]
+                combined = self._clean_ohlc(combined)
+                self._write_parquet(path, combined)
+                self._update_meta(key, path, combined)
+                if self.verbose:
+                    print(f"  Cache updated: {ticker} +{len(new_df)} rows "
+                          f"(total {len(combined)})")
+                return combined
+            return existing
+
+        # Cold start — download full history
+        start = date.today() - timedelta(days=OHLC_YEARS * 365 + 30)
+        df    = self._yf_download_single(ticker, start=start)
+        if df.empty:
             return df
+        df = self._clean_ohlc(df)
+        self._write_parquet(path, df)
+        self._update_meta(key, path, df)
+        if self.verbose:
+            print(f"  Cache created: {ticker} {len(df)} rows "
+                  f"({df.index.min().date()} – {df.index.max().date()})")
+        return df
 
     def get_ohlc_bulk(self, tickers: list, force: bool = False,
                       workers: int = 1) -> dict:
