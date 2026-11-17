@@ -6,7 +6,7 @@
 # core data
 pandas>=2.0
 numpy>=1.24
-pyarrow>=14.0
+pyarrow>=26.0.1
 requests>=2.31
 
 # fast NoSQL OHLCV store + reference-data readers
