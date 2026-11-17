@@ -5,5 +5,5 @@
 # in ../../../repos/global-stock-screener/.github/workflows.
 ruff==0.15.20
 mypy==1.19.1
-pylint==3.3.9
+pylint==4.1.3
 bandit==1.8.6
