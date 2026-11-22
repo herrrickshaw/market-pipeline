@@ -357,6 +357,10 @@ def test_load_master_fresh_file_is_read_not_rebuilt(master, monkeypatch):
     assert list(sm.load_master()["symbol"]) == ["AAA"]
 
 
+def test_stale_window_is_twenty_four_hours():
+    assert sm.STALE_HOURS == 24
+
+
 def test_load_master_stale_file_rebuilds(master, monkeypatch):
     _write_master(master)
     old = datetime.now().timestamp() - (sm.STALE_HOURS + 1) * 3600

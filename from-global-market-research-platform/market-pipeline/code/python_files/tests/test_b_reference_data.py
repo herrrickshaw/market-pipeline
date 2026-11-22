@@ -87,6 +87,11 @@ def test_read_damodaran_header_case_insensitive_and_stripped():
     assert df["Industry"].tolist() == ["Steel"] and df["_key"].tolist() == ["steel"]
 
 
+def test_read_damodaran_header_inside_probe_window_is_found():
+    rows = [["x"]] * 13 + [["Industry Name", "ROE"], ["Steel", 0.1]]  # header on the 14th row
+    assert rd._read_damodaran(_xlsx({"S": rows}))["Industry"].tolist() == ["Steel"]
+
+
 def test_read_damodaran_header_beyond_probe_window_is_missed():
     rows = [["x"]] * 16 + [["Industry Name", "ROE"], ["Steel", 0.1]]
     assert rd._read_damodaran(_xlsx({"S": rows})) is None  # only 15 rows are probed
@@ -300,3 +305,11 @@ def test_info_lists_cached_files_sorted(cache):
     (cache / "b.xls").write_bytes(b"1")
     (cache / "a.xls").write_bytes(b"1")
     assert rd.info() == {"cache_dir": str(cache), "cached_files": ["a.xls", "b.xls"]}
+
+
+def test_industry_metric_loose_match_uses_first_eight_characters(monkeypatch):
+    rows = [["Industry Name", "Current PE"], ["Soft Drinks", 11.0], ["Software", 22.0]]
+    df = rd._read_damodaran(_xlsx({"S": rows}))
+    monkeypatch.setattr(rd, "damodaran", lambda metric="pe", region="emerg": df)
+    # "software (zzz)" has no exact row; its first 8 chars pick Software, not Soft Drinks
+    assert rd.industry_metric("Software (Zzz)") == 22.0

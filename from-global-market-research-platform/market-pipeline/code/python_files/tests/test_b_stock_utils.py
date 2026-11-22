@@ -493,3 +493,18 @@ def test_bulk_download_min_bars_filters_short_history(monkeypatch, nosleep):
     monkeypatch.setattr(su, "_YF_OK", True)
     monkeypatch.setattr(su, "yf", fake, raising=False)
     assert su.bulk_download(["A"], min_bars=5, verbose=False) == {}
+
+
+def test_default_daily_move_threshold_is_sixty_percent():
+    assert su.MAX_DAILY_MOVE == 0.60
+    kept = su.clean_ohlcv(_ohlcv(2, close=[10.0, 15.5], vol=[5, 0]))  # +55% on zero volume
+    assert kept["Close"].iloc[-1] == 15.5
+    dropped = su.clean_ohlcv(_ohlcv(2, close=[10.0, 16.5], vol=[5, 0]))  # +65%
+    assert dropped["Close"].iloc[-1] == 10.0
+
+
+def test_clean_financials_keeps_partially_populated_columns():
+    df = pd.DataFrame({"2024": [1.0, np.nan], "2023": [np.nan, np.nan]}, index=["A", "B"])
+    out = su.clean_financials(df)
+    assert list(out.columns) == ["2024"]  # only the fully-empty period is dropped
+    assert out["2024"].tolist()[0] == 1.0 and pd.isna(out["2024"].iloc[1])

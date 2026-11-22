@@ -91,6 +91,8 @@ def _nasdaq_file(tmp_path):
         "Y|BRK.B|Berkshire B|N||N|N|BRK-B|BRK.B\n"
         "Y|TEST|Test Co|Q|G|N|Y|TEST|\n"
         "Y|spy |SPDR|P||Y|N|SPY|SPY\n"
+        "Y|ZZ|First Row|N||N|N|ZZ|ZZ\n"
+        "Y|YY|Second Row|Q||N|N|ZZ|YY\n"
         "Y||NoSymbol|Q|G|N|N||\n"
     )
     return p
@@ -104,6 +106,8 @@ def test_nasdaq_indexes_all_spellings_and_drops_tests(monkeypatch, tmp_path):
     assert n.index.is_unique
     assert n.at["SPY", "Listing Exchange"] == "P"  # stripped + upper-cased
     assert n.at["BRK-B", "Security Name"] == "Berkshire B"
+    # the same spelling published by two rows: the row whose primary Symbol it is wins
+    assert n.at["ZZ", "Security Name"] == "First Row" and n.at["ZZ", "Listing Exchange"] == "N"
 
 
 # ---------------------------------------------------------------- build / main

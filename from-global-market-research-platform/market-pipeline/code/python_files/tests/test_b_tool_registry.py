@@ -216,3 +216,16 @@ def test_register_builtin_screeners_wraps_specs(monkeypatch):
     assert tr.run_screener("darvas", "DarvasBoxSpec") is True
     assert tr.run_screener("darvas", "other") is False
     assert tr.register_builtin_screeners() == 6 and len(tr.list_screeners()) == 6  # idempotent
+
+
+def test_explicit_description_beats_docstring():
+    @tr.screener("both", "explicit text")
+    def both(c):
+        """doc text"""
+
+    @tr.analysis("both_a", "explicit analysis")
+    def both_a(c):
+        """doc text"""
+
+    assert tr._SCREENERS["both"].description == "explicit text"
+    assert tr._ANALYSES["both_a"].description == "explicit analysis"

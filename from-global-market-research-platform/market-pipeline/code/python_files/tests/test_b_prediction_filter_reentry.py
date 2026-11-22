@@ -19,6 +19,13 @@ def test_rsi14_short_history_is_none():
     assert pf.rsi14(pd.Series([1.0] * 5 + [None] * 30)) is None
 
 
+def test_rsi14_needs_twenty_points_exactly():
+    rng = np.random.default_rng(1)
+    c = pd.Series(100 + np.cumsum(rng.normal(0, 1, 25)))
+    assert pf.rsi14(c.iloc[:19]) is None
+    assert pf.rsi14(c.iloc[:20]) is not None
+
+
 def test_rsi14_all_losses_is_zero_and_flat_is_none():
     down = pd.Series(np.linspace(100, 50, 40))
     assert pf.rsi14(down) == 0.0

@@ -291,3 +291,10 @@ def test_main_beta_changes_ranking_weight(monkeypatch, capsys):
     tr.main()
     out5 = capsys.readouterr().out
     assert out0 != out5
+
+
+def test_composite_scale_is_the_median_absolute_fold_not_the_mean():
+    _, info = tr.composite([0.1, 0.1, 0.1, 1.0], W)
+    assert info["scale"] == pytest.approx(0.1)  # an outlier fold must not inflate the penalties
+    _, info = tr.composite([-0.4, 0.1, 0.2], W)
+    assert info["scale"] == pytest.approx(0.2)  # absolute values: median(0.4, 0.1, 0.2)

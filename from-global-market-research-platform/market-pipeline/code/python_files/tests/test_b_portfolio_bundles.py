@@ -159,7 +159,8 @@ def test_build_ignores_other_markets_and_unknown_markets():
 def test_build_caps_oversized_clusters_at_max_cluster():
     rows, frames = _universe(groups=((("A", 13), 0.010),), noise=0.001)
     store = pb.build(rows, frames)
-    assert [len(b["members"]) for b in store["bundles"]] == [pb.MAX_CLUSTER]
+    assert pb.MAX_CLUSTER == 10
+    assert [len(b["members"]) for b in store["bundles"]] == [10]
 
 
 def test_build_drops_uncorrelated_names_and_small_clusters():
@@ -364,3 +365,19 @@ def test_value_alpha_none_without_benchmark_and_ranking():
 
 def test_value_empty_store():
     assert pb.value({}, [], {}) == []
+
+
+def test_build_keeps_names_with_some_missing_history_but_drops_mostly_empty_ones():
+    rows, frames = _universe(groups=((("A", 5), 0.010),))
+    # A0 is missing its first 25 bars of the 90-bar window: 65/89 returns remain (>= 60%)
+    f = frames[("IN", "A0")].copy()
+    f.iloc[: N - pb.CORR_BARS + 25] = np.nan
+    frames[("IN", "A0")] = f
+    store = pb.build(rows, frames)
+    assert "A0" in {m["symbol"] for m in store["bundles"][0]["members"]}
+    # a name present for only the last 20 bars (< 60% of returns) is dropped from correlation
+    g = frames[("IN", "A1")].copy()
+    g.iloc[: N - 20] = np.nan
+    frames[("IN", "A1")] = g
+    store = pb.build(rows, frames)
+    assert "A1" not in {m["symbol"] for m in store["bundles"][0]["members"]}

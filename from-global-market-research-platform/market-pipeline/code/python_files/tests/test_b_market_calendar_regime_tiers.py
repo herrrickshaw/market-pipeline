@@ -57,6 +57,17 @@ def test_load_cache_fresh_and_stale_boundary(cal):
     assert mc._load_cache() == set()
 
 
+def test_refresh_window_is_fourteen_days(cal):
+    assert mc.REFRESH_AFTER_DAYS == 14
+    today = dt.date.today()
+    cal.write_text(
+        json.dumps(
+            {"fetched": (today - dt.timedelta(days=10)).isoformat(), "dates": ["2030-01-01"]}
+        )
+    )
+    assert mc._load_cache() == {"2030-01-01"}  # 10 days old is still fresh
+
+
 def test_load_cache_corrupt_or_missing_keys(cal):
     cal.write_text("{not json")
     assert mc._load_cache() == set()
@@ -237,6 +248,61 @@ def test_compute_vol_low_high_mid(monkeypatch):
         [0.01] * 100 + list(np.linspace(0.002, 0.02, 100)) + list(np.linspace(0.02, 0.002, 26)[1:])
     )
     assert _compute(monkeypatch, _alt(amps))[0]["vol"] == "MID"
+
+
+def _compute_with_vols(monkeypatch, vols):
+    """Run _compute with a hand-built rolling-vol series so the percentile is exact."""
+    n = 300
+    idx = pd.bdate_range("2024-01-01", periods=n)
+    px = pd.DataFrame(
+        {f"T{i}": 100 * np.cumprod(1 + np.full(n, 0.002)) for i in range(20)}, index=idx
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "yfinance",
+        types.SimpleNamespace(download=lambda t, **kw: pd.concat({"Close": px}, axis=1)),
+    )
+
+    def fake_rolling(self, window, *a, **k):
+        assert window == 21
+        return types.SimpleNamespace(std=lambda: pd.Series(vols[-len(self) :], index=self.index))
+
+    monkeypatch.setattr(pd.Series, "rolling", fake_rolling)
+    return mr._compute("us")["vol"]
+
+
+def _vols(n_low_or_equal, n_high, last):
+    # window = last 252 values; (n_low_or_equal - 1) smaller values, `last`, and n_high larger
+    body = [1.0] * (n_low_or_equal - 1) + [3.0] * n_high + [last]
+    assert len(body) == 252
+    return [2.0] * 47 + body
+
+
+def test_compute_vol_percentile_boundaries_are_inclusive(monkeypatch):
+    # exactly one third of the window <= latest vol -> LOW; one more -> MID
+    assert _compute_with_vols(monkeypatch, _vols(84, 168, 2.0)) == "LOW"
+    assert _compute_with_vols(monkeypatch, _vols(85, 167, 2.0)) == "MID"
+    # exactly two thirds -> MID; one more -> HIGH
+    assert _compute_with_vols(monkeypatch, _vols(168, 84, 2.0)) == "MID"
+    assert _compute_with_vols(monkeypatch, _vols(169, 83, 2.0)) == "HIGH"
+
+
+def test_compute_masks_one_day_crash_beyond_sixty_percent(monkeypatch):
+    # a -65% one-day print on every name is treated as a bad tick and ignored
+    res, _ = _compute(monkeypatch, [0.002] * 280 + [-0.65] + [0.002] * 19)
+    assert res["trend"] == "bull"
+
+
+def test_compute_needs_one_hundred_bars_for_the_ema(monkeypatch):
+    assert _compute(monkeypatch, [0.002] * 90)[0] == {"trend": "unknown", "vol": "unknown"}
+    assert _compute(monkeypatch, [0.002] * 105)[0]["trend"] != "unknown"
+
+
+def test_compute_trend_uses_five_day_ema_slope(monkeypatch):
+    # after a long rise and a 6-day slide the 5-day EMA slope is still positive while the
+    # price is already below the EMA -> chop (a 3-day slope would call it bear)
+    res, _ = _compute(monkeypatch, [0.003] * 250 + [-0.03] * 6)
+    assert res["trend"] == "chop"
 
 
 def test_compute_masks_impossible_returns(monkeypatch):

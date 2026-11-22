@@ -477,3 +477,30 @@ def test_verdict_zero_scores_are_not_missing():
 
 def test_verdict_end_to_end_from_score():
     assert pp.verdict(_s()) == "STRONG"
+
+
+def test_preset_weight_tilts_match_their_documented_intent():
+    q, t, sf = pp.PRESETS["quality"], pp.PRESETS["turnaround"], pp.PRESETS["safety"]
+    # quality: stability outweighs level, both outweigh any single Piotroski delta
+    assert (
+        q["11_roce_stable"] == 3.5
+        and q["10_roce_level"] == 2.0
+        and q["12_roce_not_deteriorating"] == 1.5
+    )
+    assert q["1_roa_positive"] == 1.0 and q["2_cfo_positive"] == 1.0 and q["7_no_dilution"] == 0.5
+    # turnaround: pays for deltas and cash quality, nothing for ROCE level/stability
+    assert (
+        t["3_roa_improving"] == 3.0
+        and t["4_accruals_cfo_gt_roa"] == 2.0
+        and t["2_cfo_positive"] == 2.0
+    )
+    assert t["8_gross_margin_rising"] == 2.0 and t["9_asset_turnover_rising"] == 2.0
+    assert (
+        t["10_roce_level"] == 0.0
+        and t["11_roce_stable"] == 0.0
+        and t["12_roce_not_deteriorating"] == 2.0
+    )
+    # safety: balance-sheet defence
+    assert sf["5_leverage_falling"] == 3.0 and sf["6_current_ratio_rising"] == 2.0
+    assert sf["7_no_dilution"] == 2.0 and sf["2_cfo_positive"] == 2.0
+    assert sf["11_roce_stable"] == 3.0 and sf["10_roce_level"] == 0.5
