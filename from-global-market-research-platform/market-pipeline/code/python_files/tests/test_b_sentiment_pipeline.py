@@ -368,6 +368,13 @@ def test_rss_name_lookup_from_symbol_master_and_ticker_fallback(monkeypatch):
     assert [a.title for a in p.fetch_news("RELIANCE")] == both
 
 
+def test_rss_three_letter_name_tokens_are_part_of_the_phrase(monkeypatch):
+    p = _rss_with(monkeypatch, [_entry("ABB India posts profit"), _entry("India GDP grows")])
+    assert [a.title for a in p.fetch_news("ABB", company_name="ABB INDIA")] == [
+        "ABB India posts profit"
+    ]
+
+
 def test_rss_ticker_fallback_skips_short_and_common_word_tickers(monkeypatch):
     p = _rss_with(
         monkeypatch,
@@ -512,6 +519,42 @@ def test_pipeline_caches_for_six_hours_per_market_and_ticker(monkeypatch):
     s.get_ticker_sentiment("TCS", "US")  # different market -> different key
     assert len(p.calls) == 2
     assert set(json.loads(sp.CACHE_FILE.read_text())) == {"IN:TCS", "US:TCS"}
+
+
+@pytest.mark.parametrize(
+    "name,weight",
+    [
+        ("Marketaux", 1.2),
+        ("AlphaVantage", 1.2),
+        ("Finnhub", 1.0),
+        ("NewsData", 0.8),
+        ("IndianRSS", 1.1),
+        ("USRSS", 1.1),
+        ("Mystery", 1.0),
+    ],
+)
+def test_pipeline_provider_weights(monkeypatch, name, weight):
+    assert sp.SentimentPipeline.PROVIDER_WEIGHT.get(name, 1.0) == weight
+    s = _pipeline(monkeypatch, [_Fake(name, [_art("a", 1.0)])])
+    s.active.append(_Fake("Mystery", [_art("b", 0.0)]))  # weight 1.0 baseline
+    assert s.get_ticker_sentiment("T").score == round(weight / (weight + 1.0), 4)
+
+
+def test_pipeline_cache_entry_exactly_at_ttl_is_stale(monkeypatch):
+    fixed = datetime(2026, 7, 1, 12, 0, 0)
+
+    class FixedDT(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed
+
+    monkeypatch.setattr(sp, "datetime", FixedDT)
+    s = _pipeline(monkeypatch, [])
+    s._cache = {
+        "k": {"fetched_at": (fixed - timedelta(hours=6)).isoformat()},
+        "j": {"fetched_at": (fixed - timedelta(hours=6) + timedelta(seconds=1)).isoformat()},
+    }
+    assert s._is_fresh("k") is False and s._is_fresh("j") is True
 
 
 def test_pipeline_cache_expiry_boundary_and_bad_timestamps(monkeypatch):
