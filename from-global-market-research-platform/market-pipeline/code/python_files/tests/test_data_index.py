@@ -1,5 +1,5 @@
 """data_index.py -- the freshness gate: file coverage, OHLC data-date coverage, status, report/require."""
-import contextlib
+
 import datetime as dt
 import json
 import os
@@ -12,7 +12,7 @@ import pytest
 import data_index as DI
 import data_registry as R
 
-NOW = 1_800_000_000.0                       # frozen "time.time()" for the file-age maths
+NOW = 1_800_000_000.0  # frozen "time.time()" for the file-age maths
 DAY = 86400.0
 
 
@@ -133,8 +133,15 @@ def days_ago(n):
 def test_ohlc_coverage_uniform_cache(tmp_path, monkeypatch):
     write_index(tmp_path, monkeypatch, {f"ohlc:T{i}": {"to": days_ago(1)} for i in range(10)})
     out = DI._ohlc_data_coverage(2.0)
-    assert out == {"coverage": 1.0, "total": 10, "fresh": 10, "newest": days_ago(1),
-                   "max_bar": days_ago(1), "lag_days": 1, "edge_stale": False}
+    assert out == {
+        "coverage": 1.0,
+        "total": 10,
+        "fresh": 10,
+        "newest": days_ago(1),
+        "max_bar": days_ago(1),
+        "lag_days": 1,
+        "edge_stale": False,
+    }
 
 
 def test_ohlc_coverage_anchors_on_median_not_max(tmp_path, monkeypatch):
@@ -149,18 +156,25 @@ def test_ohlc_coverage_anchors_on_median_not_max(tmp_path, monkeypatch):
 
 def test_ohlc_coverage_counts_behind_and_unparseable_tickers(tmp_path, monkeypatch):
     entries = {f"ohlc:A{i}": {"to": days_ago(1)} for i in range(6)}
-    entries.update({"ohlc:B0": {"to": days_ago(8)}, "ohlc:B1": {"to": days_ago(8)},
-                    "ohlc:BAD": {"to": "garbage"}, "ohlc:NONE": {}, "other:x": {"to": days_ago(30)}})
+    entries.update(
+        {
+            "ohlc:B0": {"to": days_ago(8)},
+            "ohlc:B1": {"to": days_ago(8)},
+            "ohlc:BAD": {"to": "garbage"},
+            "ohlc:NONE": {},
+            "other:x": {"to": days_ago(30)},
+        }
+    )
     write_index(tmp_path, monkeypatch, entries)
     out = DI._ohlc_data_coverage(2.0)
-    assert out["total"] == 10                                   # non-ohlc key ignored, bad ones counted
+    assert out["total"] == 10  # non-ohlc key ignored, bad ones counted
     assert out["fresh"] == 6 and out["coverage"] == pytest.approx(0.6)
     assert out["newest"] == days_ago(1)
 
 
 def test_ohlc_coverage_cutoff_is_inclusive(tmp_path, monkeypatch):
     entries = {f"ohlc:A{i}": {"to": days_ago(1)} for i in range(5)}
-    entries["ohlc:EDGE"] = {"to": days_ago(3)}                  # exactly newest - 2d
+    entries["ohlc:EDGE"] = {"to": days_ago(3)}  # exactly newest - 2d
     entries["ohlc:OUT"] = {"to": days_ago(4)}
     write_index(tmp_path, monkeypatch, entries)
     out = DI._ohlc_data_coverage(2.0)
@@ -169,7 +183,7 @@ def test_ohlc_coverage_cutoff_is_inclusive(tmp_path, monkeypatch):
 
 def test_ohlc_edge_stale_boundary_is_max_age_plus_four(tmp_path, monkeypatch):
     write_index(tmp_path, monkeypatch, {"ohlc:A": {"to": days_ago(6)}})
-    assert DI._ohlc_data_coverage(2.0)["edge_stale"] is False            # lag 6 == 2 + 4
+    assert DI._ohlc_data_coverage(2.0)["edge_stale"] is False  # lag 6 == 2 + 4
     write_index(tmp_path, monkeypatch, {"ohlc:A": {"to": days_ago(7)}})
     assert DI._ohlc_data_coverage(2.0)["edge_stale"] is True
 
@@ -178,9 +192,9 @@ def test_ohlc_coverage_accepts_timestamps_and_degenerate_files(tmp_path, monkeyp
     write_index(tmp_path, monkeypatch, {"ohlc:A": {"to": days_ago(1) + "T10:00:00"}})
     assert DI._ohlc_data_coverage(2.0)["newest"] == days_ago(1)
     write_index(tmp_path, monkeypatch, {"other": {}})
-    assert DI._ohlc_data_coverage(2.0) is None                           # no ohlc keys
+    assert DI._ohlc_data_coverage(2.0) is None  # no ohlc keys
     write_index(tmp_path, monkeypatch, {"ohlc:A": {"to": "nope"}, "ohlc:B": {}})
-    assert DI._ohlc_data_coverage(2.0) is None                           # nothing parseable
+    assert DI._ohlc_data_coverage(2.0) is None  # nothing parseable
     monkeypatch.setattr(R, "META_DIR", tmp_path / "missing")
     assert DI._ohlc_data_coverage(2.0) is None
     (tmp_path / "bad").mkdir()
@@ -192,7 +206,12 @@ def test_ohlc_coverage_accepts_timestamps_and_degenerate_files(tmp_path, monkeyp
 # ── assess ────────────────────────────────────────────────────────────────────
 def test_assess_missing(tmp_path, frozen):
     a = DI.assess(ds(tmp_path / "nope"))
-    assert a == {"key": "k", "status": "MISSING", "age_days": None, "detail": str(tmp_path / "nope")}
+    assert a == {
+        "key": "k",
+        "status": "MISSING",
+        "age_days": None,
+        "detail": str(tmp_path / "nope"),
+    }
 
 
 def test_assess_no_max_age_is_ok_with_age(tmp_path, frozen):
@@ -207,17 +226,21 @@ def test_assess_single_file_fresh_and_stale(tmp_path, frozen):
     assert ok["status"] == "OK" and ok["coverage"] == 1.0 and ok["detail"] == ""
     g = touch(tmp_path / "g", 3)
     st = DI.assess(ds(g, max_age=1.0))
-    assert st["status"] == "STALE" and st["coverage"] == 0.0 and "0% of 1 files within 1d" in st["detail"]
+    assert (
+        st["status"] == "STALE"
+        and st["coverage"] == 0.0
+        and "0% of 1 files within 1d" in st["detail"]
+    )
 
 
 def test_assess_directory_needs_eighty_percent_coverage(tmp_path, frozen):
     for i in range(5):
-        touch(tmp_path / "d4" / f"f{i}", 0.5 if i < 4 else 5)           # 4/5 = 80% -> OK
+        touch(tmp_path / "d4" / f"f{i}", 0.5 if i < 4 else 5)  # 4/5 = 80% -> OK
     a = DI.assess(ds(tmp_path / "d4", max_age=1.0))
     assert a["status"] == "OK" and a["coverage"] == pytest.approx(0.8)
     assert a["detail"] == "80% of 5 files within 1d (need 80%) — newest is 0.5d old"
     for i in range(5):
-        touch(tmp_path / "d3" / f"f{i}", 0.5 if i < 3 else 5)           # 60% -> STALE
+        touch(tmp_path / "d3" / f"f{i}", 0.5 if i < 3 else 5)  # 60% -> STALE
     b = DI.assess(ds(tmp_path / "d3", max_age=1.0))
     assert b["status"] == "STALE" and b["coverage"] == pytest.approx(0.6)
     assert "60% of 5 files within 1d" in b["detail"]
@@ -232,9 +255,13 @@ def test_assess_newest_file_cannot_mask_a_stale_directory(tmp_path, frozen):
 
 
 def test_assess_ohlc_uses_data_dates_not_mtimes(tmp_path, monkeypatch, frozen):
-    f = touch(tmp_path / "cache", 0.01)                              # fresh mtime, stale content
-    write_index(tmp_path, monkeypatch, {f"ohlc:A{i}": {"to": days_ago(1)} for i in range(9)} |
-                {f"ohlc:B{i}": {"to": days_ago(9)} for i in range(9)})
+    f = touch(tmp_path / "cache", 0.01)  # fresh mtime, stale content
+    write_index(
+        tmp_path,
+        monkeypatch,
+        {f"ohlc:A{i}": {"to": days_ago(1)} for i in range(9)}
+        | {f"ohlc:B{i}": {"to": days_ago(9)} for i in range(9)},
+    )
     a = DI.assess(ds(f, key="cache.ohlc", max_age=2.0))
     assert a["status"] == "STALE" and a["coverage"] == pytest.approx(0.5)
     assert "only 50% of 18 tickers are within 2d of the leading edge (need 80%)" in a["detail"]
@@ -250,8 +277,9 @@ def test_assess_ohlc_healthy_and_edge_stale(tmp_path, monkeypatch, frozen):
     write_index(tmp_path, monkeypatch, {f"ohlc:A{i}": {"to": days_ago(20)} for i in range(10)})
     old = DI.assess(ds(f, key="cache.ohlc", max_age=2.0))
     assert old["status"] == "STALE"
-    assert old["detail"] == (f"latest bar {days_ago(20)} (20d ago); "
-                             "leading edge itself is 20d behind today")
+    assert old["detail"] == (
+        f"latest bar {days_ago(20)} (20d ago); leading edge itself is 20d behind today"
+    )
 
 
 def test_assess_ohlc_without_index_falls_back_to_file_coverage(tmp_path, monkeypatch, frozen):
@@ -269,7 +297,7 @@ def test_assess_warehouse_dataset(monkeypatch):
     assert a["status"] == "UNKNOWN" and a["age_days"] is None and "unreachable" in a["detail"]
     monkeypatch.setattr(DI, "_pg_freshness", lambda: {"IN": days_ago(1), "US": days_ago(3)})
     b = DI.assess(wh)
-    assert b["status"] == "OK" and b["age_days"] == 3                 # oldest market, boundary == max_age
+    assert b["status"] == "OK" and b["age_days"] == 3  # oldest market, boundary == max_age
     assert b["detail"] == f"IN:{days_ago(1)}, US:{days_ago(3)}"
     monkeypatch.setattr(DI, "_pg_freshness", lambda: {"IN": days_ago(1), "US": days_ago(4)})
     assert DI.assess(wh)["status"] == "STALE"
@@ -291,10 +319,12 @@ def test_assess_only_unowned_dev_null_is_the_warehouse(tmp_path, monkeypatch):
 def registry(tmp_path, frozen, monkeypatch):
     fresh = touch(tmp_path / "fresh", 0.1)
     stale = touch(tmp_path / "stale", 9)
-    sets = [ds(fresh, "a.fresh", 1.0, "ingest", "w1.py"),
-            ds(stale, "a.stale", 1.0, "ingest", "w2.py", note="🔴 do not trust this"),
-            ds(tmp_path / "gone", "b.missing", 1.0, "mailer", "w3.py"),
-            ds(fresh, "c.ok", 1.0, "modelling", "w4.py")]
+    sets = [
+        ds(fresh, "a.fresh", 1.0, "ingest", "w1.py"),
+        ds(stale, "a.stale", 1.0, "ingest", "w2.py", note="🔴 do not trust this"),
+        ds(tmp_path / "gone", "b.missing", 1.0, "mailer", "w3.py"),
+        ds(fresh, "c.ok", 1.0, "modelling", "w4.py"),
+    ]
     monkeypatch.setattr(R, "DATASETS", sets)
     monkeypatch.setattr(R, "for_section", lambda s: [d for d in sets if d.section == s])
     return sets
@@ -345,7 +375,10 @@ def test_report_persist_records_every_dataset_and_survives_failures(registry, mo
         calls.append((key, status, coverage_pct))
         if key == "a.stale":
             raise RuntimeError("db down")
-    monkeypatch.setitem(sys.modules, "system_state", types.SimpleNamespace(record_data_snapshot=record))
+
+    monkeypatch.setitem(
+        sys.modules, "system_state", types.SimpleNamespace(record_data_snapshot=record)
+    )
     assert DI.report(persist=True) == 0
     assert [c[0] for c in calls] == ["a.fresh", "a.stale", "b.missing", "c.ok"]
     assert calls[0] == ("a.fresh", "OK", 1.0)

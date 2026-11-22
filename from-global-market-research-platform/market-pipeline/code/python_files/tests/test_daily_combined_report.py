@@ -3,6 +3,7 @@
 The module creates ./combined_report_results at import, so it is imported inside a
 sandboxed working directory (and removed from sys.modules afterwards).
 """
+
 import importlib
 import json
 import subprocess
@@ -37,96 +38,153 @@ def by_symbol(df):
 
 # ── get_fundamental_picks ─────────────────────────────────────────────────────
 def test_picks_layout_a_tiering_sorting_and_piotroski(DCR, tmp_path):
-    write_xlsx(tmp_path / "us_full_scan" / "us_full_scan_20260101.xlsx", {
-        "Triple_Hits": [{"Symbol": "TTT", "Piotroski_Score": 9, "LTP": 10.0}],
-        "Multi_Screen_Hits": [{"Symbol": "MMM", "Piotroski_Score": 7, "LTP": 20.0}],
-        "Piotroski_Strong": [{"Symbol": "AAA", "Piotroski_Score": 8, "LTP": 30.0},
-                             {"Symbol": "MMM", "Piotroski_Score": 8, "LTP": 21.0},
-                             {"Symbol": "SSS", "Piotroski_Score": 8, "LTP": 33.0}],
-        "Coffee_Can": [{"Symbol": "AAA"}, {"Symbol": "SSS"}],
-        "Magic_Formula": [{"Symbol": "AAA"}],
-        "Bull_Cartel": [{"Symbol": "AAA"}, {"Symbol": "ONE"}]})
+    write_xlsx(
+        tmp_path / "us_full_scan" / "us_full_scan_20260101.xlsx",
+        {
+            "Triple_Hits": [{"Symbol": "TTT", "Piotroski_Score": 9, "LTP": 10.0}],
+            "Multi_Screen_Hits": [{"Symbol": "MMM", "Piotroski_Score": 7, "LTP": 20.0}],
+            "Piotroski_Strong": [
+                {"Symbol": "AAA", "Piotroski_Score": 8, "LTP": 30.0},
+                {"Symbol": "MMM", "Piotroski_Score": 8, "LTP": 21.0},
+                {"Symbol": "SSS", "Piotroski_Score": 8, "LTP": 33.0},
+            ],
+            "Coffee_Can": [{"Symbol": "AAA"}, {"Symbol": "SSS"}],
+            "Magic_Formula": [{"Symbol": "AAA"}],
+            "Bull_Cartel": [{"Symbol": "AAA"}, {"Symbol": "ONE"}],
+        },
+    )
     df = DCR.get_fundamental_picks("US")
     rows = by_symbol(df)
     assert rows["TTT"]["Tier"] == "Triple Hit" and rows["TTT"]["Screens"] == "—"
     assert rows["MMM"]["Tier"] == "Multi-Screen" and rows["MMM"]["Screens"] == "Piotroski"
-    assert rows["AAA"]["Tier"] == "Multi-Screen"                  # 4 screeners >= 3
+    assert rows["AAA"]["Tier"] == "Multi-Screen"  # 4 screeners >= 3
     assert rows["AAA"]["Screens"] == "BullCartel+CoffeeCan+MagicFormula+Piotroski"
     assert rows["AAA"]["N_Screens"] == 4
     assert rows["SSS"]["Tier"] == "Single-Screen" and rows["SSS"]["N_Screens"] == 2
     assert rows["ONE"]["Tier"] == "Single-Screen" and rows["ONE"]["N_Screens"] == 1
     assert list(df["Symbol"])[:2] == ["TTT", "AAA"]
-    assert list(df["Tier"]) == ["Triple Hit", "Multi-Screen", "Multi-Screen",
-                                "Single-Screen", "Single-Screen"]
+    assert list(df["Tier"]) == [
+        "Triple Hit",
+        "Multi-Screen",
+        "Multi-Screen",
+        "Single-Screen",
+        "Single-Screen",
+    ]
     assert list(df["N_Screens"])[:2] == [0, 4] and list(df["N_Screens"])[3:] == [2, 1]
-    assert rows["MMM"]["Piotroski"] == 8 and rows["MMM"]["LTP"] == 21.0   # later sheet wins
+    assert rows["MMM"]["Piotroski"] == 8 and rows["MMM"]["LTP"] == 21.0  # later sheet wins
     assert rows["TTT"]["Piotroski"] == 9
     assert "_r" not in df.columns
 
 
 def test_picks_exactly_three_screeners_is_multi_screen(DCR, tmp_path):
-    write_xlsx(tmp_path / "us_full_scan" / "us_full_scan_1.xlsx", {
-        "Piotroski_Strong": [{"Symbol": "X3"}, {"Symbol": "X2"}],
-        "Coffee_Can": [{"Symbol": "X3"}, {"Symbol": "X2"}],
-        "Magic_Formula": [{"Symbol": "X3"}]})
+    write_xlsx(
+        tmp_path / "us_full_scan" / "us_full_scan_1.xlsx",
+        {
+            "Piotroski_Strong": [{"Symbol": "X3"}, {"Symbol": "X2"}],
+            "Coffee_Can": [{"Symbol": "X3"}, {"Symbol": "X2"}],
+            "Magic_Formula": [{"Symbol": "X3"}],
+        },
+    )
     rows = by_symbol(DCR.get_fundamental_picks("US"))
     assert rows["X3"]["Tier"] == "Multi-Screen" and rows["X2"]["Tier"] == "Single-Screen"
 
 
 def test_picks_darvas_sheet_keeps_only_breakouts(DCR, tmp_path):
-    write_xlsx(tmp_path / "us_full_scan" / "us_full_scan_1.xlsx", {
-        "Darvas_Signals": [{"Symbol": "BRK", "Darvas_Signal": "breakout_buy"},
-                           {"Symbol": "HOLD", "Darvas_Signal": "HOLD"}]})
+    write_xlsx(
+        tmp_path / "us_full_scan" / "us_full_scan_1.xlsx",
+        {
+            "Darvas_Signals": [
+                {"Symbol": "BRK", "Darvas_Signal": "breakout_buy"},
+                {"Symbol": "HOLD", "Darvas_Signal": "HOLD"},
+            ]
+        },
+    )
     rows = by_symbol(DCR.get_fundamental_picks("US"))
     assert list(rows) == ["BRK"] and rows["BRK"]["Screens"] == "Darvas"
 
 
 def test_picks_layout_b_fundamentals_and_golden_cross(DCR, tmp_path):
-    write_xlsx(tmp_path / "indian_full_scan" / "indian_full_scan_1.xlsx", {
-        "Fundamentals": [
-            {"Symbol": "RELIANCE", "LTP": 100.0, "Piotroski_Score": 8, "Piotroski_Strong": "yes",
-             "CoffeeCan": "pass", "MagicFormula": "PASS", "BullCartel": "FAIL",
-             "Darvas_Signal": "BREAKOUT_BUY"},
-            {"Symbol": "TCS", "LTP": 50.0, "Piotroski_Score": 3, "Piotroski_Strong": "NO",
-             "CoffeeCan": "FAIL", "MagicFormula": "FAIL", "BullCartel": "PASS",
-             "Darvas_Signal": "HOLD"}],
-        "All_Stocks": [{"Symbol": "TCS", "GC_Signal": "golden_cross", "Piotroski_Score": 4,
-                        "LTP": 51.0},
-                       {"Symbol": "INFY", "GC_Signal": "ABOVE_200DMA"}]})
+    write_xlsx(
+        tmp_path / "indian_full_scan" / "indian_full_scan_1.xlsx",
+        {
+            "Fundamentals": [
+                {
+                    "Symbol": "RELIANCE",
+                    "LTP": 100.0,
+                    "Piotroski_Score": 8,
+                    "Piotroski_Strong": "yes",
+                    "CoffeeCan": "pass",
+                    "MagicFormula": "PASS",
+                    "BullCartel": "FAIL",
+                    "Darvas_Signal": "BREAKOUT_BUY",
+                },
+                {
+                    "Symbol": "TCS",
+                    "LTP": 50.0,
+                    "Piotroski_Score": 3,
+                    "Piotroski_Strong": "NO",
+                    "CoffeeCan": "FAIL",
+                    "MagicFormula": "FAIL",
+                    "BullCartel": "PASS",
+                    "Darvas_Signal": "HOLD",
+                },
+            ],
+            "All_Stocks": [
+                {"Symbol": "TCS", "GC_Signal": "golden_cross", "Piotroski_Score": 4, "LTP": 51.0},
+                {"Symbol": "INFY", "GC_Signal": "ABOVE_200DMA"},
+            ],
+        },
+    )
     rows = by_symbol(DCR.get_fundamental_picks("IN"))
     assert set(rows) == {"RELIANCE", "TCS"}
     assert rows["RELIANCE"]["Screens"] == "CoffeeCan+Darvas+MagicFormula+Piotroski"
     assert rows["RELIANCE"]["Tier"] == "Multi-Screen" and rows["RELIANCE"]["N_Screens"] == 4
-    assert rows["TCS"]["Screens"] == "BullCartel+GoldenCross" and rows["TCS"]["Tier"] == "Single-Screen"
+    assert (
+        rows["TCS"]["Screens"] == "BullCartel+GoldenCross"
+        and rows["TCS"]["Tier"] == "Single-Screen"
+    )
     assert rows["TCS"]["Piotroski"] == 4 and rows["TCS"]["LTP"] == 51.0
 
 
 def test_picks_all_stocks_without_gc_column_is_ignored(DCR, tmp_path):
-    write_xlsx(tmp_path / "us_full_scan" / "us_full_scan_1.xlsx", {
-        "All_Stocks": [{"Symbol": "Q"}], "Coffee_Can": [{"Symbol": "Z"}]})
+    write_xlsx(
+        tmp_path / "us_full_scan" / "us_full_scan_1.xlsx",
+        {"All_Stocks": [{"Symbol": "Q"}], "Coffee_Can": [{"Symbol": "Z"}]},
+    )
     assert list(DCR.get_fundamental_picks("US")["Symbol"]) == ["Z"]
 
 
 def test_picks_uses_newest_workbook(DCR, tmp_path):
     for n, sym in (("1", "OLD"), ("2", "NEW")):
-        write_xlsx(tmp_path / "us_full_scan" / f"us_full_scan_{n}.xlsx", {"Coffee_Can": [{"Symbol": sym}]})
+        write_xlsx(
+            tmp_path / "us_full_scan" / f"us_full_scan_{n}.xlsx", {"Coffee_Can": [{"Symbol": sym}]}
+        )
     assert list(DCR.get_fundamental_picks("US")["Symbol"]) == ["NEW"]
 
 
 def test_picks_prints_summary_counts(DCR, tmp_path, capsys):
-    write_xlsx(tmp_path / "us_full_scan" / "us_full_scan_1.xlsx", {
-        "Triple_Hits": [{"Symbol": "T"}], "Coffee_Can": [{"Symbol": "S"}]})
+    write_xlsx(
+        tmp_path / "us_full_scan" / "us_full_scan_1.xlsx",
+        {"Triple_Hits": [{"Symbol": "T"}], "Coffee_Can": [{"Symbol": "S"}]},
+    )
     DCR.get_fundamental_picks("US")
-    assert "2 UNIQUE fundamental picks across all screeners (1 triple, 0 multi-screen, 1 single-screen)" \
+    assert (
+        "2 UNIQUE fundamental picks across all screeners (1 triple, 0 multi-screen, 1 single-screen)"
         in capsys.readouterr().out
+    )
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError,
-                   reason="a blank Symbol cell reads from Excel as NaN; str(NaN or '') is 'nan', so "
-                          "the blank row is aggregated as a pick named 'nan'")
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="a blank Symbol cell reads from Excel as NaN; str(NaN or '') is 'nan', so "
+    "the blank row is aggregated as a pick named 'nan'",
+)
 def test_picks_blank_symbol_cells_are_skipped(DCR, tmp_path):
-    write_xlsx(tmp_path / "us_full_scan" / "us_full_scan_1.xlsx", {
-        "Coffee_Can": [{"Symbol": None, "LTP": 1.0}, {"Symbol": "OK", "LTP": 2.0}]})
+    write_xlsx(
+        tmp_path / "us_full_scan" / "us_full_scan_1.xlsx",
+        {"Coffee_Can": [{"Symbol": None, "LTP": 1.0}, {"Symbol": "OK", "LTP": 2.0}]},
+    )
     assert list(DCR.get_fundamental_picks("US")["Symbol"]) == ["OK"]
 
 
@@ -140,7 +198,7 @@ def test_picks_runs_scan_when_missing_or_forced(DCR, tmp_path, monkeypatch):
     assert calls[1][0][1:] == ["full_us_market_scan.py", "--workers", "10", "--min-price", "2"]
     write_xlsx(tmp_path / "us_full_scan" / "us_full_scan_1.xlsx", {"Coffee_Can": [{"Symbol": "Z"}]})
     DCR.get_fundamental_picks("US")
-    assert len(calls) == 2                                           # files exist: no run
+    assert len(calls) == 2  # files exist: no run
     DCR.get_fundamental_picks("US", run_fresh=True)
     assert len(calls) == 3
 
@@ -158,18 +216,31 @@ def fake_pipeline(monkeypatch, record):
 
         def get_batch(self, symbols, market):
             record["batch"] = (list(symbols), market)
-            return {s: S(0.5, "POSITIVE", 3, [{"title": "a"}, {"title": "b"}, {"title": "c"}])
-                    for s in symbols}
-    monkeypatch.setitem(sys.modules, "sentiment_pipeline", types.SimpleNamespace(SentimentPipeline=SP))
+            return {
+                s: S(0.5, "POSITIVE", 3, [{"title": "a"}, {"title": "b"}, {"title": "c"}])
+                for s in symbols
+            }
+
+    monkeypatch.setitem(
+        sys.modules, "sentiment_pipeline", types.SimpleNamespace(SentimentPipeline=SP)
+    )
 
 
 def test_street_talk_shapes_results_and_trims_headlines(DCR, monkeypatch):
     rec = {}
     fake_pipeline(monkeypatch, rec)
     mood, talk = DCR.get_street_talk(["AAA", "BBB"], "US")
-    assert mood["mood"] == "POSITIVE" and rec["mood_market"] == "US" and rec["batch"] == (["AAA", "BBB"], "US")
-    assert talk["AAA"] == {"score": 0.5, "label": "POSITIVE", "n_articles": 3,
-                           "headlines": [{"title": "a"}, {"title": "b"}]}
+    assert (
+        mood["mood"] == "POSITIVE"
+        and rec["mood_market"] == "US"
+        and rec["batch"] == (["AAA", "BBB"], "US")
+    )
+    assert talk["AAA"] == {
+        "score": 0.5,
+        "label": "POSITIVE",
+        "n_articles": 3,
+        "headlines": [{"title": "a"}, {"title": "b"}],
+    }
 
 
 def test_street_talk_no_symbols_skips_batch(DCR, monkeypatch):
@@ -186,19 +257,38 @@ def test_street_talk_without_sentiment_module(DCR, monkeypatch):
 
 # ── find_convergence ──────────────────────────────────────────────────────────
 def talk_entry(label, score, n=2, heads=None):
-    return {"label": label, "score": score, "n_articles": n,
-            "headlines": [{"title": "H" * 100}] if heads is None else heads}
+    return {
+        "label": label,
+        "score": score,
+        "n_articles": n,
+        "headlines": [{"title": "H" * 100}] if heads is None else heads,
+    }
 
 
 def test_convergence_labels_sorting_and_filters(DCR):
-    picks = pd.DataFrame({"Symbol": ["N1", "P1", "NG", "P2", "ND", "NONE", "EMPTY"],
-                          "Tier": ["T"] * 7})
-    talk = {"N1": talk_entry("NEUTRAL", 0.0), "P1": talk_entry("POSITIVE", 0.4),
-            "NG": talk_entry("NEGATIVE", -0.6), "P2": talk_entry("POSITIVE", 0.9),
-            "ND": talk_entry("NO_DATA", 0.0), "EMPTY": talk_entry("POSITIVE", 0.1, heads=[])}
+    picks = pd.DataFrame(
+        {"Symbol": ["N1", "P1", "NG", "P2", "ND", "NONE", "EMPTY"], "Tier": ["T"] * 7}
+    )
+    talk = {
+        "N1": talk_entry("NEUTRAL", 0.0),
+        "P1": talk_entry("POSITIVE", 0.4),
+        "NG": talk_entry("NEGATIVE", -0.6),
+        "P2": talk_entry("POSITIVE", 0.9),
+        "ND": talk_entry("NO_DATA", 0.0),
+        "EMPTY": talk_entry("POSITIVE", 0.1, heads=[]),
+    }
     out = DCR.find_convergence(picks, talk)
-    assert list(out["Symbol"]) == ["P2", "P1", "EMPTY", "N1", "NG"]       # both-bullish, neutral, negative
-    assert list(out["Convergence"]) == ["✅ BOTH BULLISH"] * 3 + ["— news neutral", "⚠️ NEWS NEGATIVE"]
+    assert list(out["Symbol"]) == [
+        "P2",
+        "P1",
+        "EMPTY",
+        "N1",
+        "NG",
+    ]  # both-bullish, neutral, negative
+    assert list(out["Convergence"]) == ["✅ BOTH BULLISH"] * 3 + [
+        "— news neutral",
+        "⚠️ NEWS NEGATIVE",
+    ]
     assert "_rank" not in out.columns
     assert out.set_index("Symbol").loc["P1", "Top_Headline"] == "H" * 80
     assert out.set_index("Symbol").loc["EMPTY", "Top_Headline"] == ""
@@ -207,31 +297,58 @@ def test_convergence_labels_sorting_and_filters(DCR):
 
 def test_convergence_empty_inputs(DCR):
     assert DCR.find_convergence(pd.DataFrame({"Symbol": ["A"], "Tier": ["T"]}), {}).empty
-    assert DCR.find_convergence(pd.DataFrame({"Symbol": [], "Tier": []}), {"A": talk_entry("POSITIVE", 1)}).empty
-    assert DCR.find_convergence(pd.DataFrame({"Symbol": ["A"], "Tier": ["T"]}),
-                                {"A": {}}).empty                      # falsy talk entry skipped
+    assert DCR.find_convergence(
+        pd.DataFrame({"Symbol": [], "Tier": []}), {"A": talk_entry("POSITIVE", 1)}
+    ).empty
+    assert DCR.find_convergence(
+        pd.DataFrame({"Symbol": ["A"], "Tier": ["T"]}), {"A": {}}
+    ).empty  # falsy talk entry skipped
 
 
 # ── build_report / rendering ──────────────────────────────────────────────────
 def sample_report(DCR, market="IN", empty=False):
-    picks = pd.DataFrame() if empty else pd.DataFrame({
-        "Symbol": ["AAA", "BBB"], "Tier": ["Triple Hit", "Single-Screen"],
-        "Screens": ["Coffee", "—"], "Piotroski": [8, None]})
-    talk = {} if empty else {"AAA": talk_entry("POSITIVE", 0.5, 4, [{"title": "Great quarter"}]),
-                             "BBB": talk_entry("NEGATIVE", -0.4, 2, [{"title": "Probe opened"}]),
-                             "CCC": talk_entry("NO_DATA", 0.0, 0, [])}
+    picks = (
+        pd.DataFrame()
+        if empty
+        else pd.DataFrame(
+            {
+                "Symbol": ["AAA", "BBB"],
+                "Tier": ["Triple Hit", "Single-Screen"],
+                "Screens": ["Coffee", "—"],
+                "Piotroski": [8, None],
+            }
+        )
+    )
+    talk = (
+        {}
+        if empty
+        else {
+            "AAA": talk_entry("POSITIVE", 0.5, 4, [{"title": "Great quarter"}]),
+            "BBB": talk_entry("NEGATIVE", -0.4, 2, [{"title": "Probe opened"}]),
+            "CCC": talk_entry("NO_DATA", 0.0, 0, []),
+        }
+    )
     mood = {} if empty else {"mood": "POSITIVE", "score": 0.25, "n_articles": 12}
     conv = DCR.find_convergence(picks, talk) if not empty else pd.DataFrame()
-    return {"market": market, "generated": "2026-01-01T09:00:00", "picks": picks, "mood": mood,
-            "talk": talk, "convergence": conv}
+    return {
+        "market": market,
+        "generated": "2026-01-01T09:00:00",
+        "picks": picks,
+        "mood": mood,
+        "talk": talk,
+        "convergence": conv,
+    }
 
 
 def test_build_report_limits_symbols_to_top_25(DCR, monkeypatch):
     picks = pd.DataFrame({"Symbol": [f"S{i}" for i in range(40)], "Tier": ["T"] * 40})
     seen = {}
     monkeypatch.setattr(DCR, "get_fundamental_picks", lambda m, fresh: picks)
-    monkeypatch.setattr(DCR, "get_street_talk",
-                        lambda syms, m: seen.update(syms=list(syms), market=m) or ({"mood": "x"}, {}))
+    monkeypatch.setattr(
+        DCR,
+        "get_street_talk",
+        lambda syms, m: seen.update(syms=list(syms), market=m) or ({"mood": "x"}, {}),
+    )
     rep = DCR.build_report("US", True)
     assert seen["syms"] == [f"S{i}" for i in range(25)] and seen["market"] == "US"
     assert rep["market"] == "US" and rep["picks"] is picks and rep["mood"] == {"mood": "x"}
@@ -250,9 +367,14 @@ def test_print_report_full(DCR, capsys):
     DCR.print_report(sample_report(DCR))
     out = capsys.readouterr().out
     assert "COMPONENT 1" in out and "AAA" in out and "Triple Hit" in out
-    assert "Market mood: POSITIVE (+0.25) from 12 articles (Moneycontrol/ET/BusinessLine/LiveMint)" in out
-    assert out.index("AAA", out.index("COMPONENT 2")) < out.index("BBB", out.index("COMPONENT 2"))   # by score desc
-    assert "CCC" not in out                                              # NO_DATA hidden
+    assert (
+        "Market mood: POSITIVE (+0.25) from 12 articles (Moneycontrol/ET/BusinessLine/LiveMint)"
+        in out
+    )
+    assert out.index("AAA", out.index("COMPONENT 2")) < out.index(
+        "BBB", out.index("COMPONENT 2")
+    )  # by score desc
+    assert "CCC" not in out  # NO_DATA hidden
     assert "🎯 1 HIGH-CONVICTION" in out and "news +0.50 (4 art) — Great quarter" in out
     assert "⚠️  1 CAUTION" in out and "news -0.40 — Probe opened" in out
 
@@ -284,10 +406,22 @@ def test_to_html_sections_colours_and_rows(DCR):
 
 
 def many_picks(DCR, n=30):
-    picks = pd.DataFrame({"Symbol": [f"S{i:02d}" for i in range(n)], "Tier": "Single-Screen",
-                          "Screens": "Coffee", "Piotroski": 7.0})
-    return {"market": "IN", "generated": "t", "picks": picks, "mood": {}, "talk": {},
-            "convergence": pd.DataFrame()}
+    picks = pd.DataFrame(
+        {
+            "Symbol": [f"S{i:02d}" for i in range(n)],
+            "Tier": "Single-Screen",
+            "Screens": "Coffee",
+            "Piotroski": 7.0,
+        }
+    )
+    return {
+        "market": "IN",
+        "generated": "t",
+        "picks": picks,
+        "mood": {},
+        "talk": {},
+        "convergence": pd.DataFrame(),
+    }
 
 
 def test_rendering_shows_at_most_25_picks(DCR, capsys):
@@ -328,7 +462,9 @@ def test_save_empty_report_has_empty_lists(DCR, tmp_path):
 
 def test_main_wires_arguments(DCR, monkeypatch):
     calls = []
-    monkeypatch.setattr(DCR, "build_report", lambda m, fresh: calls.append(("build", m, fresh)) or "REP")
+    monkeypatch.setattr(
+        DCR, "build_report", lambda m, fresh: calls.append(("build", m, fresh)) or "REP"
+    )
     monkeypatch.setattr(DCR, "print_report", lambda r: calls.append(("print", r)))
     monkeypatch.setattr(DCR, "save", lambda r, html: calls.append(("save", r, html)))
     monkeypatch.setattr(sys, "argv", ["x", "--market", "US", "--run-fresh", "--html"])

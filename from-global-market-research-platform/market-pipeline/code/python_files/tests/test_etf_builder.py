@@ -1,4 +1,5 @@
 """etf_builder.py -- weighting schemes, performance maths, point-in-time panel loader."""
+
 import sys
 
 import numpy as np
@@ -12,8 +13,11 @@ PANDAS3 = int(pd.__version__.split(".")[0]) >= 3
 # copy-on-write, so the scheme raises ValueError there (main() swallows it and silently
 # substitutes equal weights).
 invvol_cow_bug = pytest.mark.xfail(
-    PANDAS3, strict=True, raises=ValueError,
-    reason="w_invvol assigns into a read-only array under pandas>=3 copy-on-write")
+    PANDAS3,
+    strict=True,
+    raises=ValueError,
+    reason="w_invvol assigns into a read-only array under pandas>=3 copy-on-write",
+)
 
 
 def rets(n_days=300, n_assets=10, seed=0, drift=None):
@@ -34,8 +38,13 @@ def test_equal_weights():
 @invvol_cow_bug
 def test_inverse_vol_weights_proportional_to_one_over_sigma():
     rng = np.random.default_rng(1)
-    R = pd.DataFrame({"a": rng.normal(0, 0.01, 500), "b": rng.normal(0, 0.02, 500),
-                      "c": rng.normal(0, 0.04, 500)})
+    R = pd.DataFrame(
+        {
+            "a": rng.normal(0, 0.01, 500),
+            "b": rng.normal(0, 0.02, 500),
+            "c": rng.normal(0, 0.04, 500),
+        }
+    )
     w = EB.w_invvol(R, None, None)
     assert w.sum() == pytest.approx(1.0)
     assert w[0] > w[1] > w[2]
@@ -85,6 +94,7 @@ def test_optimisers_fall_back_to_equal_weight_when_solver_fails(fn, monkeypatch)
     class Fail:
         success = False
         x = np.zeros(3)
+
     monkeypatch.setattr(so, "minimize", lambda *a, **k: Fail())
     w = getattr(EB, fn)(None, np.array([0.1, 0.2, 0.3]), np.eye(3))
     assert list(w) == pytest.approx([1 / 3] * 3)
@@ -97,33 +107,38 @@ def test_max_sharpe_zero_variance_does_not_divide_by_zero():
 
 def test_momentum_picks_top_quintile_with_floor_of_five():
     R = rets(300, 10, drift=np.arange(10) * 0.001)
-    R = R - R.mean() + np.arange(10) * 0.001                       # exact per-column drift
+    R = R - R.mean() + np.arange(10) * 0.001  # exact per-column drift
     w = EB.w_momentum(R, None, None)
     assert (w > 0).sum() == 5 and set(np.flatnonzero(w)) == {5, 6, 7, 8, 9}
     assert w.sum() == pytest.approx(1.0) and w[w > 0] == pytest.approx([0.2] * 5)
     big = rets(300, 40, drift=np.arange(40) * 0.0005)
     w40 = EB.w_momentum(big, None, None)
-    assert (w40 > 0).sum() == 8 and w40[w40 > 0] == pytest.approx([1 / 8] * 8)    # 40 // 5
+    assert (w40 > 0).sum() == 8 and w40[w40 > 0] == pytest.approx([1 / 8] * 8)  # 40 // 5
 
 
 def test_momentum_skips_the_most_recent_month():
     R = pd.DataFrame(0.001, index=range(300), columns=[f"S{i}" for i in range(10)])
     R["S0"] = 0.0
-    R.loc[279:, "S0"] = 0.10                    # all of S0's gain is in the last 21 days
+    R.loc[279:, "S0"] = 0.10  # all of S0's gain is in the last 21 days
     w = EB.w_momentum(R, None, None)
-    assert w[0] == 0.0                          # 12-1 skip removes it
+    assert w[0] == 0.0  # 12-1 skip removes it
     assert (w > 0).sum() == 5
 
 
 def test_schemes_registry():
-    assert list(EB.SCHEMES) == ["1/N equal", "inverse-vol", "min-variance", "max-Sharpe",
-                                "momentum 12-1"]
+    assert list(EB.SCHEMES) == [
+        "1/N equal",
+        "inverse-vol",
+        "min-variance",
+        "max-Sharpe",
+        "momentum 12-1",
+    ]
     assert EB.SCHEMES["1/N equal"] is EB.w_equal
 
 
 # ── perf ──────────────────────────────────────────────────────────────────────
 def test_perf_values_for_monthly_nav():
-    nav = pd.Series([1.0, 1.1, 1.21, 0.968, 1.0648] + [1.0648] * 8)    # 13 points -> 12 periods
+    nav = pd.Series([1.0, 1.1, 1.21, 0.968, 1.0648] + [1.0648] * 8)  # 13 points -> 12 periods
     p = EB.perf(nav, 12)
     r = nav.pct_change().dropna()
     assert p["cagr"] == pytest.approx(1.0648 ** (1 / 1.0) - 1)
@@ -133,9 +148,9 @@ def test_perf_values_for_monthly_nav():
 
 
 def test_perf_annualises_by_periods_per_year_not_252():
-    nav = pd.Series(1.02 ** np.arange(0, 13))                           # +2%/month for a year
-    assert EB.perf(nav, 12)["cagr"] == pytest.approx(1.02 ** 12 - 1)
-    assert EB.perf(pd.Series(1.02 ** np.arange(0, 5)), 4)["cagr"] == pytest.approx(1.02 ** 4 - 1)
+    nav = pd.Series(1.02 ** np.arange(0, 13))  # +2%/month for a year
+    assert EB.perf(nav, 12)["cagr"] == pytest.approx(1.02**12 - 1)
+    assert EB.perf(pd.Series(1.02 ** np.arange(0, 5)), 4)["cagr"] == pytest.approx(1.02**4 - 1)
     nav = pd.Series([1.0, 1.1, 1.0, 1.1, 1.0, 1.1, 1.0, 1.1, 1.0])
     r = nav.pct_change().dropna()
     assert EB.perf(nav, 4)["vol"] == pytest.approx(r.std() * np.sqrt(4))
@@ -154,15 +169,20 @@ def test_perf_degenerate_inputs():
 # ── load_panel / main ─────────────────────────────────────────────────────────
 def test_load_panel_pivots_close_and_turnover_from_2016(monkeypatch):
     import backtest_tier_anomalies as bta
-    df = pd.DataFrame({
-        "Date": pd.to_datetime(["2015-12-31", "2016-01-04", "2016-01-04", "2016-01-05",
-                                "2016-01-05"]),
-        "Symbol": ["A", "A", "B", "A", "B"],
-        "Close": [1.0, 10.0, 20.0, 11.0, 21.0],
-        "Volume": [5, 2, 3, 4, 6]})
+
+    df = pd.DataFrame(
+        {
+            "Date": pd.to_datetime(
+                ["2015-12-31", "2016-01-04", "2016-01-04", "2016-01-05", "2016-01-05"]
+            ),
+            "Symbol": ["A", "A", "B", "A", "B"],
+            "Close": [1.0, 10.0, 20.0, 11.0, 21.0],
+            "Volume": [5, 2, 3, 4, 6],
+        }
+    )
     monkeypatch.setattr(bta, "load_market", lambda m: df)
     px, tv = EB.load_panel("US")
-    assert list(px.index.strftime("%Y-%m-%d")) == ["2016-01-04", "2016-01-05"]    # 2015 dropped
+    assert list(px.index.strftime("%Y-%m-%d")) == ["2016-01-04", "2016-01-05"]  # 2015 dropped
     assert px.loc["2016-01-05", "B"] == 21.0
     assert tv.loc["2016-01-04", "A"] == 20.0 and tv.loc["2016-01-05", "B"] == 126.0
     assert list(px.columns) == ["A", "B"]
@@ -179,11 +199,13 @@ def test_main_refuses_unadjusted_india_panel(monkeypatch, capsys):
 def test_main_override_flag_gets_past_the_refusal(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["x", "--market", "IN", "--allow-unadjusted"])
     loaded = []
-    monkeypatch.setattr(EB, "load_panel", lambda m: loaded.append(m) or (_ for _ in ()).throw(KeyError("stop")))
+    monkeypatch.setattr(
+        EB, "load_panel", lambda m: loaded.append(m) or (_ for _ in ()).throw(KeyError("stop"))
+    )
     with pytest.raises(KeyError):
         EB.main()
     assert loaded == ["IN"]
 
 
 def test_constants():
-    assert EB.UNADJUSTED == {"IN"} and EB.WEIGHT_CAP == 0.10 and EB.COST_BPS == 10.0
+    assert {"IN"} == EB.UNADJUSTED and EB.WEIGHT_CAP == 0.10 and EB.COST_BPS == 10.0

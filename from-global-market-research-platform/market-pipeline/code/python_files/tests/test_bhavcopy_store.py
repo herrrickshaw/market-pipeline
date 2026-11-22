@@ -1,4 +1,5 @@
 """bhavcopy_store.py -- LMDB OHLCV store: serialisation round-trip, build sources, readers, vacuum."""
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -10,8 +11,10 @@ import bhavcopy_store as BS  # noqa: E402
 def ohlcv(n=5, start="2024-01-01", base=100.0, vol=1000):
     idx = pd.date_range(start, periods=n, freq="B", name="Date")
     c = base + np.arange(n) * 0.5
-    return pd.DataFrame({"Open": c - 0.1, "High": c + 1, "Low": c - 1, "Close": c,
-                         "Volume": np.full(n, vol)}, index=idx)
+    return pd.DataFrame(
+        {"Open": c - 0.1, "High": c + 1, "Low": c - 1, "Close": c, "Volume": np.full(n, vol)},
+        index=idx,
+    )
 
 
 @pytest.fixture
@@ -54,11 +57,13 @@ def test_de_sorts_by_date_and_handles_frames_without_a_date_column():
     assert out.index.is_monotonic_increasing
     plain = pd.DataFrame({"when": pd.date_range("2024-01-01", periods=3), "Close": [3.0, 1.0, 2.0]})
     import io
+
     import pyarrow as pa
     import pyarrow.feather as feather
+
     buf = io.BytesIO()
     feather.write_feather(pa.Table.from_pandas(plain, preserve_index=False), buf)
-    out = BS._de(buf.getvalue())                       # first column becomes the index
+    out = BS._de(buf.getvalue())  # first column becomes the index
     assert out.index.name == "when" and list(out["Close"]) == [3.0, 1.0, 2.0]
 
 
@@ -70,8 +75,12 @@ def test_ser_tolerates_missing_price_columns():
 
 # ── build from a dict ─────────────────────────────────────────────────────────
 def test_build_from_dict_skips_empty_frames_and_records_meta(store, capsys):
-    hist = {"AAA": ohlcv(5), "BBB": ohlcv(3, start="2024-03-01"), "EMPTY": ohlcv(3).iloc[0:0],
-            "NONE": None}
+    hist = {
+        "AAA": ohlcv(5),
+        "BBB": ohlcv(3, start="2024-03-01"),
+        "EMPTY": ohlcv(3).iloc[0:0],
+        "NONE": None,
+    }
     assert BS.build(hist) == 2
     assert BS.symbols() == sorted(BS.symbols()) and set(BS.symbols()) == {"AAA", "BBB"}
     info = BS.info()
@@ -81,8 +90,14 @@ def test_build_from_dict_skips_empty_frames_and_records_meta(store, capsys):
 
 
 def test_build_latest_bar_is_the_max_across_symbols(store):
-    BS.build({"OLD": ohlcv(3, start="2024-06-03"), "NEW": ohlcv(3, start="2025-01-06"),
-              "MID": ohlcv(3, start="2024-09-02")}, verbose=False)
+    BS.build(
+        {
+            "OLD": ohlcv(3, start="2024-06-03"),
+            "NEW": ohlcv(3, start="2025-01-06"),
+            "MID": ohlcv(3, start="2024-09-02"),
+        },
+        verbose=False,
+    )
     assert BS.info()["latest_bar"].startswith("2025-01-08")
 
 
@@ -115,10 +130,12 @@ def test_build_ingests_cleaned_and_market_seeds(store, capsys):
     n = BS.build()
     assert n == 2 and set(BS.symbols()) == {"RELIANCE", "AAPL"}
     aapl = BS.get("AAPL")
-    assert list(aapl.columns) == ["Open", "High", "Low", "Close", "Volume"]       # Extra dropped
+    assert list(aapl.columns) == ["Open", "High", "Low", "Close", "Volume"]  # Extra dropped
     assert len(aapl) == 6 and aapl["Close"].iloc[0] == pytest.approx(200.0)
-    assert "ingesting 2 market seed(s): cleaned_long.parquet, cleaned_long_US.parquet" in \
-        capsys.readouterr().out
+    assert (
+        "ingesting 2 market seed(s): cleaned_long.parquet, cleaned_long_US.parquet"
+        in capsys.readouterr().out
+    )
 
 
 def test_build_without_any_seed_raises(store):
@@ -158,6 +175,7 @@ def test_load_all_excludes_meta_and_symbols_lists_keys(store):
 
 def test_info_for_store_without_meta(store):
     import lmdb
+
     env = lmdb.open(str(BS.STORE), map_size=1 << 20, subdir=True)
     with env.begin(write=True) as txn:
         txn.put(b"AAA", BS._ser(ohlcv(2)))

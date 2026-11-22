@@ -1,4 +1,5 @@
 """factor_combo_test.py -- year-clustered excess-return stats and the factor-combination table."""
+
 import math
 import sys
 
@@ -37,27 +38,30 @@ def test_year_clustered_hand_values():
     assert out["se"] == pytest.approx(sd / 2) and out["t"] == pytest.approx(2.5 / (sd / 2))
     assert out["years_positive"] == 4
     assert out["pooled_mean"] == pytest.approx(2.5) and out["pooled_median"] == pytest.approx(2.5)
-    assert out["top1_share"] == pytest.approx(4.2 / 50.0)                 # best 4.2 over total 50
+    assert out["top1_share"] == pytest.approx(4.2 / 50.0)  # best 4.2 over total 50
 
 
 def test_year_clustered_uses_median_within_year_not_mean():
-    df = pd.DataFrame({"year": [2020] * 5 + [2021] * 5,
-                       "x": [1, 1, 1, 1, 1000.0] + [2, 2, 2, 2, 2]})
+    df = pd.DataFrame(
+        {"year": [2020] * 5 + [2021] * 5, "x": [1, 1, 1, 1, 1000.0] + [2, 2, 2, 2, 2]}
+    )
     out = FC.year_clustered(df, "x")
-    assert out["mean"] == pytest.approx(1.5)                              # medians 1 and 2
+    assert out["mean"] == pytest.approx(1.5)  # medians 1 and 2
     assert out["pooled_mean"] > 100
 
 
 def test_year_clustered_counts_positive_years_strictly():
     df = pd.DataFrame({"year": [2016, 2017, 2018, 2019], "x": [-1.0, 0.0, 1.0, 2.0]})
-    assert FC.year_clustered(df, "x")["years_positive"] == 2               # 0.0 is not positive
+    assert FC.year_clustered(df, "x")["years_positive"] == 2  # 0.0 is not positive
 
 
 def test_year_clustered_degenerate_inputs():
     assert FC.year_clustered(pd.DataFrame(), "x") == {}
     assert FC.year_clustered(pd.DataFrame({"year": [1]}), "x") == {}
     assert FC.year_clustered(yearly([1.0]), "x") == {"n_years": 1}
-    assert FC.year_clustered(pd.DataFrame({"year": [2020, 2021], "x": [np.nan, np.nan]}), "x") == {"n_years": 0}
+    assert FC.year_clustered(pd.DataFrame({"year": [2020, 2021], "x": [np.nan, np.nan]}), "x") == {
+        "n_years": 0
+    }
 
 
 def test_year_clustered_zero_dispersion_has_no_t_stat():
@@ -80,11 +84,18 @@ def make_panel(tmp_path, n_per_year=80, years=range(2016, 2022), horizon=252, wi
         off = y - 2015
         for i in range(n_per_year):
             half = i % 2 == 0
-            rows.append({"year": y, f"xret_T+{horizon}d": off + (1.0 if half else -1.0),
-                         "piotroski": half, "roce_plus": i % 4 == 0,
-                         "debt_reduction": None, "not_distress": True,
-                         "low_asset_growth": half,
-                         "log_liquidity": float(i % 10)})
+            rows.append(
+                {
+                    "year": y,
+                    f"xret_T+{horizon}d": off + (1.0 if half else -1.0),
+                    "piotroski": half,
+                    "roce_plus": i % 4 == 0,
+                    "debt_reduction": None,
+                    "not_distress": True,
+                    "low_asset_growth": half,
+                    "log_liquidity": float(i % 10),
+                }
+            )
     d = pd.DataFrame(rows)
     d.loc[d.year.isin([2016, 2017, 2018, 2019]), "debt_reduction"] = True
     d["debt_reduction"] = d["debt_reduction"].astype(object)
@@ -113,9 +124,15 @@ def test_run_table_values(tmp_path, capsys):
     by = tbl.set_index("combo")
     assert list(tbl["combo"]) == [n for n, _ in FC.COMBOS]
     base = by.loc["ALL (baseline)"]
-    assert base["n"] == 480 and base["mean"] == pytest.approx(3.5) and base["edge"] == pytest.approx(0.0)
+    assert (
+        base["n"] == 480
+        and base["mean"] == pytest.approx(3.5)
+        and base["edge"] == pytest.approx(0.0)
+    )
     pio = by.loc["piotroski"]
-    assert pio["n"] == 240 and pio["mean"] == pytest.approx(4.5) and pio["edge"] == pytest.approx(1.0)
+    assert (
+        pio["n"] == 240 and pio["mean"] == pytest.approx(4.5) and pio["edge"] == pytest.approx(1.0)
+    )
     assert pio["years_positive"] == 6 and bool(pio["testable"])
     sd = np.std(np.arange(2, 8), ddof=1)
     assert pio["t"] == pytest.approx(4.5 / (sd / math.sqrt(6)))
@@ -123,7 +140,9 @@ def test_run_table_values(tmp_path, capsys):
     assert both["n"] == 120 and both["mean"] == pytest.approx(4.5)
     out = capsys.readouterr().out
     assert "universe: 480 symbol-years across 6 years (2016-2021)" in out
-    assert "baseline median xret: +3.50pp" in out and "FACTOR COMBINATION TEST — panel.parquet" in out
+    assert (
+        "baseline median xret: +3.50pp" in out and "FACTOR COMBINATION TEST — panel.parquet" in out
+    )
 
 
 def test_run_testability_floor_n_and_years(tmp_path, capsys):
@@ -133,7 +152,7 @@ def test_run_testability_floor_n_and_years(tmp_path, capsys):
     # debt_reduction exists in only 4 of 6 years (4*80=320 rows): testable; combined with a
     # 3-year slice it would not be
     assert bool(by.loc["debt_reduction", "testable"]) and by.loc["debt_reduction", "n_years"] == 4
-    out = capsys.readouterr().out
+    capsys.readouterr()
     d = pd.read_parquet(p)
     d.loc[d.year.isin([2018, 2019]), "debt_reduction"] = None
     d.to_parquet(p, index=False)
@@ -145,17 +164,17 @@ def test_run_testability_floor_n_and_years(tmp_path, capsys):
 
 def test_run_min_n_boundary(tmp_path):
     rows = []
-    for y in range(2016, 2020):                                         # exactly 4 years
-        for i in range(10):                                             # 10 flagged per year -> n=40
+    for y in range(2016, 2020):  # exactly 4 years
+        for i in range(10):  # 10 flagged per year -> n=40
             rows.append({"year": y, "xret_T+252d": float(i), "piotroski": True})
         rows.append({"year": y, "xret_T+252d": 0.0, "piotroski": False})
     p = tmp_path / "p.parquet"
     pd.DataFrame(rows).to_parquet(p, index=False)
     _, tbl = FC.run(p, 252, None)
-    assert bool(tbl.set_index("combo").loc["piotroski", "testable"])    # n == 40 is enough
+    assert bool(tbl.set_index("combo").loc["piotroski", "testable"])  # n == 40 is enough
     d = pd.DataFrame(rows)
     d = d.drop(d[(d.year == 2019) & (d.piotroski) & (d["xret_T+252d"] == 9.0)].index)
-    d.to_parquet(p, index=False)                                        # n == 39
+    d.to_parquet(p, index=False)  # n == 39
     _, tbl = FC.run(p, 252, None)
     assert not bool(tbl.set_index("combo").loc["piotroski", "testable"])
 
@@ -177,7 +196,7 @@ def test_run_liquidity_gate_filters_rows(tmp_path, capsys):
     assert "liquidity gate: log_liquidity >= 5.0 kept 240/480" in capsys.readouterr().out
     p2 = make_panel(tmp_path, with_liq=False)
     capsys.readouterr()
-    _, tbl2 = FC.run(p2, 252, 5.0)                                      # no column: gate silently off
+    _, tbl2 = FC.run(p2, 252, 5.0)  # no column: gate silently off
     assert tbl2.set_index("combo").loc["ALL (baseline)", "n"] == 480
     assert "liquidity gate" not in capsys.readouterr().out
 
@@ -207,9 +226,12 @@ def test_main_rejects_unsupported_horizon(tmp_path, monkeypatch):
         FC.main()
 
 
-@pytest.mark.xfail(strict=True, raises=TypeError,
-                   reason="run() returns a bare 1 on error paths but main() unpacks `rc, tbl = run(...)`, "
-                          "so a missing panel crashes with TypeError instead of exiting 1")
+@pytest.mark.xfail(
+    strict=True,
+    raises=TypeError,
+    reason="run() returns a bare 1 on error paths but main() unpacks `rc, tbl = run(...)`, "
+    "so a missing panel crashes with TypeError instead of exiting 1",
+)
 def test_main_missing_panel_exits_one_instead_of_crashing(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["x", "--panel", str(tmp_path / "missing.parquet")])
     assert FC.main() == 1

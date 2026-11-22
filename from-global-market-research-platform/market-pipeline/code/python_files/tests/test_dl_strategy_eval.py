@@ -3,13 +3,13 @@
 scikit-learn is not a CI dependency, so the classifier is replaced with a deterministic fake.
 The module creates ./dl_strategy_results at import and is therefore imported in a sandbox cwd.
 """
+
 import importlib
 import sys
 
 import numpy as np
 import pandas as pd
 import pytest
-
 
 PANDAS3 = int(pd.__version__.split(".")[0]) >= 3
 
@@ -34,15 +34,23 @@ def osc(n):
 def ohlcv(n, close=None, volume=1000.0):
     close = np.asarray(close if close is not None else osc(n), dtype=float)
     idx = pd.bdate_range("2015-01-01", periods=len(close))
-    return pd.DataFrame({"Open": close, "High": close + 1.0, "Low": close - 1.0, "Close": close,
-                         "Volume": np.full(len(close), volume)}, index=idx)
+    return pd.DataFrame(
+        {
+            "Open": close,
+            "High": close + 1.0,
+            "Low": close - 1.0,
+            "Close": close,
+            "Volume": np.full(len(close), volume),
+        },
+        index=idx,
+    )
 
 
 # ── build_panel ───────────────────────────────────────────────────────────────
 def test_panel_row_count_drops_warmup_and_forward_window(DSE):
     df = ohlcv(400)
     p = DSE.build_panel(df, horizon=21)
-    assert len(p) == 400 - 251 - 21                      # 252-bar high warm-up, 21 unlabeled tail
+    assert len(p) == 400 - 251 - 21  # 252-bar high warm-up, 21 unlabeled tail
     assert p.index[0] == df.index[251] and p.index[-1] == df.index[400 - 22]
     assert list(p.columns) == DSE.FEATURES + ["_label", "_fwd_ret"]
 
@@ -56,18 +64,25 @@ def test_panel_feature_values_on_an_oscillating_series(DSE):
     assert row["ret_21d"] == pytest.approx((c[i] / c[i - 21] - 1) * 100)
     assert row["ret_63d"] == pytest.approx((c[i] / c[i - 63] - 1) * 100)
     assert row["mom_accel"] == pytest.approx(row["ret_5d"] - row["ret_21d"])
-    assert row["dma50_gap"] == pytest.approx((c[i] - c[i - 49:i + 1].mean()) / c[i - 49:i + 1].mean() * 100)
-    assert row["dma200_gap"] == pytest.approx((c[i] - c[i - 199:i + 1].mean()) / c[i - 199:i + 1].mean() * 100)
-    hi = c[i - 251:i + 1].max() + 1.0                                               # High = close + 1
+    assert row["dma50_gap"] == pytest.approx(
+        (c[i] - c[i - 49 : i + 1].mean()) / c[i - 49 : i + 1].mean() * 100
+    )
+    assert row["dma200_gap"] == pytest.approx(
+        (c[i] - c[i - 199 : i + 1].mean()) / c[i - 199 : i + 1].mean() * 100
+    )
+    hi = c[i - 251 : i + 1].max() + 1.0  # High = close + 1
     assert row["dist_high"] == pytest.approx((c[i] - hi) / hi * 100)
     assert row["vol_ratio"] == pytest.approx(1.0)
     assert row["vol_21d"] == pytest.approx(
-        pd.Series(c).pct_change().rolling(21).std().iloc[i] * np.sqrt(252) * 100)
-    d = np.diff(c)[i - 14:i]
+        pd.Series(c).pct_change().rolling(21).std().iloc[i] * np.sqrt(252) * 100
+    )
+    d = np.diff(c)[i - 14 : i]
     gain, loss = np.clip(d, 0, None).mean(), np.clip(-d, 0, None).mean()
     assert row["rsi_14"] == pytest.approx(100 - 100 / (1 + gain / loss))
-    w = c[i - 19:i + 1]
-    assert row["bb_pct"] == pytest.approx((c[i] - (w.mean() - 2 * w.std(ddof=1))) / (4 * w.std(ddof=1)))
+    w = c[i - 19 : i + 1]
+    assert row["bb_pct"] == pytest.approx(
+        (c[i] - (w.mean() - 2 * w.std(ddof=1))) / (4 * w.std(ddof=1))
+    )
 
 
 def test_panel_rsi_of_a_balanced_series_is_fifty(DSE):
@@ -88,11 +103,11 @@ def test_panel_label_and_forward_return(DSE):
     i = 251
     assert p["_fwd_ret"].iloc[0] == pytest.approx((c[i + 21] / c[i] - 1) * 100)
     assert list(p["_label"]) == [int(x > 0) for x in p["_fwd_ret"]]
-    assert 0 < p["_label"].mean() < 1                       # both classes present
+    assert 0 < p["_label"].mean() < 1  # both classes present
 
 
 def test_panel_label_is_strictly_positive_forward_return(DSE):
-    close = np.concatenate([osc(300), np.full(100, osc(300)[-1])])                # flat tail
+    close = np.concatenate([osc(300), np.full(100, osc(300)[-1])])  # flat tail
     p = DSE.build_panel(ohlcv(400, close), horizon=21)
     flat_rows = p[p["_fwd_ret"] == 0.0]
     assert len(flat_rows) > 0 and (flat_rows["_label"] == 0).all()
@@ -102,12 +117,14 @@ def test_panel_features_never_use_future_bars(DSE):
     close = osc(500)
     full = DSE.build_panel(ohlcv(500, close), horizon=21)
     cut = close.copy()
-    cut[300:] = 1000.0                                     # corrupt everything after bar 299
+    cut[300:] = 1000.0  # corrupt everything after bar 299
     changed = DSE.build_panel(ohlcv(500, cut), horizon=21)
     common = full.index.intersection(changed.index)
     early = common[common < ohlcv(500).index[300]]
     pd.testing.assert_frame_equal(full.loc[early, DSE.FEATURES], changed.loc[early, DSE.FEATURES])
-    assert not np.allclose(full.loc[early, "_fwd_ret"].iloc[-1], changed.loc[early, "_fwd_ret"].iloc[-1])
+    assert not np.allclose(
+        full.loc[early, "_fwd_ret"].iloc[-1], changed.loc[early, "_fwd_ret"].iloc[-1]
+    )
 
 
 def test_panel_zero_volume_bar_blanks_the_next_twenty_rows(DSE):
@@ -149,7 +166,9 @@ def sk(DSE, monkeypatch):
 
 def wavy(n=900, seed=0):
     rng = np.random.default_rng(seed)
-    return 100.0 * np.exp(np.cumsum(rng.normal(0.0002, 0.012, n)) + 0.15 * np.sin(np.arange(n) / 20))
+    return 100.0 * np.exp(
+        np.cumsum(rng.normal(0.0002, 0.012, n)) + 0.15 * np.sin(np.arange(n) / 20)
+    )
 
 
 def test_evaluate_requires_sklearn_and_enough_history(DSE, sk, monkeypatch):
@@ -194,11 +213,18 @@ def test_evaluate_periods_step_by_horizon_over_the_last_30_percent(sk):
     r = sk.evaluate_stock(("AAA", df, 21, 0.55))
     assert r["n_periods"] == len(range(0, te - 1, 21))
     assert FakeClf.fit_shape == (split, len(sk.FEATURES))
-    assert FakeClf.kw == {"n_estimators": 80, "max_depth": 3, "learning_rate": 0.05, "random_state": 42}
+    assert FakeClf.kw == {
+        "n_estimators": 80,
+        "max_depth": 3,
+        "learning_rate": 0.05,
+        "random_state": 42,
+    }
 
 
 def test_evaluate_hand_computed_strategy_numbers(sk):
-    FakeClf.proba = lambda X: np.where(np.arange(len(X)) % 42 == 0, 0.9, 0.1)     # long every other period
+    FakeClf.proba = lambda X: np.where(
+        np.arange(len(X)) % 42 == 0, 0.9, 0.1
+    )  # long every other period
     df = ohlcv(900, wavy())
     panel = sk.build_panel(df, 21)
     split = int(len(panel) * 0.70)
@@ -213,7 +239,9 @@ def test_evaluate_hand_computed_strategy_numbers(sk):
     assert r["alpha%"] == round((np.prod(1 + sr) - np.prod(1 + br)) * 100, 2)
     assert r["bh_sharpe"] == round(br.mean() / br.std() * np.sqrt(252 / 21), 3)
     eq = np.cumprod(1 + br)
-    assert r["bh_maxdd%"] == round(((eq - np.maximum.accumulate(eq)) / np.maximum.accumulate(eq)).min() * 100, 2)
+    assert r["bh_maxdd%"] == round(
+        ((eq - np.maximum.accumulate(eq)) / np.maximum.accumulate(eq)).min() * 100, 2
+    )
     assert r["hit_rate%"] == round((sr > 0).mean() * 100, 1)
     assert bool(r["beat_bh"]) is bool(np.prod(1 + sr) > np.prod(1 + br))
 
@@ -227,6 +255,7 @@ def test_evaluate_classifier_failure_is_swallowed(sk, monkeypatch):
     class Boom(FakeClf):
         def fit(self, X, y):
             raise RuntimeError("diverged")
+
     monkeypatch.setattr(sk, "GradientBoostingClassifier", Boom)
     assert sk.evaluate_stock(("AAA", ohlcv(900, wavy()), 21, 0.55)) is None
 
@@ -241,13 +270,13 @@ def test_load_stocks_market_filter_dedupe_and_length(DSE, tmp_path, monkeypatch)
     long_df = ohlcv(600).assign(Extra=1)
     for name in ("RELIANCE.NS", "TCS.BO", "AAPL", "MSFT"):
         long_df.to_parquet(cache / f"{name}.parquet")
-    long_df.to_parquet(ref / "AAPL.parquet")                         # duplicate stem: loaded once
+    long_df.to_parquet(ref / "AAPL.parquet")  # duplicate stem: loaded once
     long_df.to_parquet(ref / "NVDA.parquet")
     ohlcv(599).to_parquet(cache / "SHORT.parquet")
     (cache / "BAD.parquet").write_text("not parquet")
     assert set(DSE.load_stocks("ALL", 0)) == {"RELIANCE.NS", "TCS.BO", "AAPL", "MSFT", "NVDA"}
-    assert set(DSE.load_stocks("IN", 0)) == {"RELIANCE.NS"}                  # only .NS for India
-    assert set(DSE.load_stocks("US", 0)) == {"AAPL", "MSFT", "NVDA"}         # no .NS/.BO
+    assert set(DSE.load_stocks("IN", 0)) == {"RELIANCE.NS"}  # only .NS for India
+    assert set(DSE.load_stocks("US", 0)) == {"AAPL", "MSFT", "NVDA"}  # no .NS/.BO
     out = DSE.load_stocks("ALL", 0)["AAPL"]
     assert list(out.columns) == ["Open", "High", "Low", "Close", "Volume"]
 
@@ -265,15 +294,28 @@ def test_load_stocks_max_applies_before_loading_and_fills_gaps(DSE, tmp_path, mo
     assert len(DSE.load_stocks("ALL", 2)) == 2
     df = DSE.load_stocks("ALL", 0)["A"]
     assert not df.isna().any().any()
-    assert df["Close"].iloc[0] == df["Close"].iloc[1]                       # back-filled head
+    assert df["Close"].iloc[0] == df["Close"].iloc[1]  # back-filled head
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
 def fake_results(n, alpha):
-    return [{"symbol": f"S{i}", "n_periods": 10, "n_long": 5, "strat_cum%": 10.0 + alpha,
-             "bh_cum%": 10.0, "alpha%": alpha, "strat_sharpe": 1.0, "bh_sharpe": 0.8,
-             "strat_maxdd%": -5.0, "bh_maxdd%": -15.0, "hit_rate%": 55.0,
-             "beat_bh": alpha > 0} for i in range(n)]
+    return [
+        {
+            "symbol": f"S{i}",
+            "n_periods": 10,
+            "n_long": 5,
+            "strat_cum%": 10.0 + alpha,
+            "bh_cum%": 10.0,
+            "alpha%": alpha,
+            "strat_sharpe": 1.0,
+            "bh_sharpe": 0.8,
+            "strat_maxdd%": -5.0,
+            "bh_maxdd%": -15.0,
+            "hit_rate%": 55.0,
+            "beat_bh": alpha > 0,
+        }
+        for i in range(n)
+    ]
 
 
 def run_main(DSE, monkeypatch, stocks, rows, capsys):
@@ -295,38 +337,49 @@ def test_main_stops_without_sklearn_or_data(DSE, monkeypatch, capsys):
     DSE.main()
     assert "pip install scikit-learn" in capsys.readouterr().out
     out = run_main(DSE, monkeypatch, {f"S{i}": None for i in range(19)}, [], capsys)
-    assert "Insufficient data." in out                                       # fewer than 20 stocks
+    assert "Insufficient data." in out  # fewer than 20 stocks
     out = run_main(DSE, monkeypatch, {f"S{i}": None for i in range(20)}, [None, None], capsys)
     assert "No valid backtests." in out and "STEP 3" not in out
 
 
 def test_main_return_edge_verdict(DSE, monkeypatch, capsys):
-    out = run_main(DSE, monkeypatch, {f"S{i}": None for i in range(20)}, fake_results(3, 5.0), capsys)
+    out = run_main(
+        DSE, monkeypatch, {f"S{i}": None for i in range(20)}, fake_results(3, 5.0), capsys
+    )
     assert "Strategy shows a return edge (+5.0% avg alpha, beats BH 100% of the time)" in out
     assert "BEAT buy-and-hold: 100.0%" in out and "Top 10 by out-of-sample alpha" in out
     assert "Mean cumulative return%" in out and "Mean max drawdown%" in out
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError,
-                   reason="dd_edge = bh_maxdd - strat_maxdd, but max drawdowns are negative numbers: a "
-                          "strategy with the SMALLER drawdown (-5% vs -15%) yields -10, so the "
-                          "'cuts drawdown' verdict can only fire when the strategy's drawdown is WORSE")
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="dd_edge = bh_maxdd - strat_maxdd, but max drawdowns are negative numbers: a "
+    "strategy with the SMALLER drawdown (-5% vs -15%) yields -10, so the "
+    "'cuts drawdown' verdict can only fire when the strategy's drawdown is WORSE",
+)
 def test_main_drawdown_reduction_verdict(DSE, monkeypatch, capsys):
-    out = run_main(DSE, monkeypatch, {f"S{i}": None for i in range(20)}, fake_results(3, -1.0), capsys)
+    out = run_main(
+        DSE, monkeypatch, {f"S{i}": None for i in range(20)}, fake_results(3, -1.0), capsys
+    )
     assert "cuts drawdown by 10.0pp" in out
 
 
 def test_main_no_edge_verdict(DSE, monkeypatch, capsys):
     rows = fake_results(3, -1.0)
     for r in rows:
-        r["bh_maxdd%"] = -6.0                         # drawdown improvement only 1pp
+        r["bh_maxdd%"] = -6.0  # drawdown improvement only 1pp
     out = run_main(DSE, monkeypatch, {f"S{i}": None for i in range(20)}, rows, capsys)
     assert "does NOT reliably beat buy-and-hold (alpha -1.0%, beats BH 0%)" in out
 
 
-@pytest.mark.xfail(PANDAS3, strict=True, raises=IndexError,
-                   reason="main() calls DataFrame.to_excel(writer, 'Sheet', ...) with a positional sheet "
-                          "name, which pandas>=3 rejects; the ExcelWriter then fails to close")
+@pytest.mark.xfail(
+    PANDAS3,
+    strict=True,
+    raises=IndexError,
+    reason="main() calls DataFrame.to_excel(writer, 'Sheet', ...) with a positional sheet "
+    "name, which pandas>=3 rejects; the ExcelWriter then fails to close",
+)
 def test_main_writes_the_excel_report(DSE, monkeypatch, capsys):
     rows = fake_results(3, -1.0)
     monkeypatch.setattr(DSE, "_SK_OK", True)
@@ -336,4 +389,6 @@ def test_main_writes_the_excel_report(DSE, monkeypatch, capsys):
     files = list(DSE.OUT_DIR.glob("dl_strategy_IN_*.xlsx"))
     assert len(files) == 1
     sheets = pd.read_excel(files[0], sheet_name=None)
-    assert set(sheets) == {"DISCLAIMER", "Strategy_Results"} and len(sheets["Strategy_Results"]) == 3
+    assert (
+        set(sheets) == {"DISCLAIMER", "Strategy_Results"} and len(sheets["Strategy_Results"]) == 3
+    )
