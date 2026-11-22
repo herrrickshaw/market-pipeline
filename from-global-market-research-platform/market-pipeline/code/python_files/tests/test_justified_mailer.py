@@ -1,4 +1,5 @@
 """justified_mailer.py -- RSI, oversold/momentum pick selection, evidence HTML, watchlist sync."""
+
 import smtplib
 import sys
 import types
@@ -74,45 +75,81 @@ def env(tmp_path, monkeypatch):
 
 # ── _tiers ────────────────────────────────────────────────────────────────────
 def test_tiers_reads_latest_workbook_and_dedupes(env):
-    write_workbook(env, "us_full_scan", "us_full_scan_1.xlsx",
-                   [{"Symbol": "OLD", "Liquidity_Tier": "T1_MOST_LIQUID", "Name": "Old"}])
-    write_workbook(env, "us_full_scan", "us_full_scan_2.xlsx",
-                   [{"Symbol": "AAA", "Liquidity_Tier": "T1_MOST_LIQUID", "Name": "Alpha"},
-                    {"Symbol": "AAA", "Liquidity_Tier": "T5_MOST_ILLIQUID", "Name": "Dup"},
-                    {"Symbol": "BBB", "Liquidity_Tier": "T2_LIQUID"}])
+    write_workbook(
+        env,
+        "us_full_scan",
+        "us_full_scan_1.xlsx",
+        [{"Symbol": "OLD", "Liquidity_Tier": "T1_MOST_LIQUID", "Name": "Old"}],
+    )
+    write_workbook(
+        env,
+        "us_full_scan",
+        "us_full_scan_2.xlsx",
+        [
+            {"Symbol": "AAA", "Liquidity_Tier": "T1_MOST_LIQUID", "Name": "Alpha"},
+            {"Symbol": "AAA", "Liquidity_Tier": "T5_MOST_ILLIQUID", "Name": "Dup"},
+            {"Symbol": "BBB", "Liquidity_Tier": "T2_LIQUID"},
+        ],
+    )
     t = JM._tiers("US")
     assert list(t.index) == ["AAA", "BBB"]
-    assert t.loc["AAA", "tier"] == "T1_MOST_LIQUID" and t.loc["AAA", "name"] == "Alpha"     # first kept
+    assert (
+        t.loc["AAA", "tier"] == "T1_MOST_LIQUID" and t.loc["AAA", "name"] == "Alpha"
+    )  # first kept
     assert t.loc["BBB", "name"] == "" or pd.isna(t.loc["BBB", "name"])
 
 
 def test_tiers_uses_market_specific_symbol_column_and_missing_workbook(env):
-    write_workbook(env, "korea_scan", "korea_market_scan_1.xlsx",
-                   [{"YF_Ticker": "005930.KS", "Liquidity_Tier": "T2_LIQUID", "Name": "Samsung"}])
+    write_workbook(
+        env,
+        "korea_scan",
+        "korea_market_scan_1.xlsx",
+        [{"YF_Ticker": "005930.KS", "Liquidity_Tier": "T2_LIQUID", "Name": "Samsung"}],
+    )
     assert list(JM._tiers("KR").index) == ["005930.KS"]
     assert JM._tiers("JP").empty
 
 
 # ── oversold_picks ────────────────────────────────────────────────────────────
 def test_oversold_picks_selection_rules(env):
-    series = {"DEEP": beaten_down(120, 7), "SHALLOW": beaten_down(120, 3), "SHORT": beaten_down(99, 7),
-              "EXACT": beaten_down(100, 7), "PENNY": beaten_down(120, 7, start=1.5) * 0.5,
-              "ILLIQ": beaten_down(120, 7), "NOTIER": beaten_down(120, 7),
-              "RISER": np.linspace(10, 50, 120), "ZOMBIE": np.linspace(50, 10, 120)}
+    series = {
+        "DEEP": beaten_down(120, 7),
+        "SHALLOW": beaten_down(120, 3),
+        "SHORT": beaten_down(99, 7),
+        "EXACT": beaten_down(100, 7),
+        "PENNY": beaten_down(120, 7, start=1.5) * 0.5,
+        "ILLIQ": beaten_down(120, 7),
+        "NOTIER": beaten_down(120, 7),
+        "RISER": np.linspace(10, 50, 120),
+        "ZOMBIE": np.linspace(50, 10, 120),
+    }
     panel(series).to_parquet(env / "US.parquet", index=False)
-    write_workbook(env, "us_full_scan", "us_full_scan_1.xlsx", [
-        {"Symbol": s, "Liquidity_Tier": t, "Name": f"{s} Corp"} for s, t in [
-            ("DEEP", "T1_MOST_LIQUID"), ("SHALLOW", "T3_MID"), ("SHORT", "T1_MOST_LIQUID"),
-            ("EXACT", "T2_LIQUID"), ("PENNY", "T1_MOST_LIQUID"), ("ILLIQ", "T4_ILLIQUID"),
-            ("RISER", "T1_MOST_LIQUID"), ("ZOMBIE", "T1_MOST_LIQUID")]])
+    write_workbook(
+        env,
+        "us_full_scan",
+        "us_full_scan_1.xlsx",
+        [
+            {"Symbol": s, "Liquidity_Tier": t, "Name": f"{s} Corp"}
+            for s, t in [
+                ("DEEP", "T1_MOST_LIQUID"),
+                ("SHALLOW", "T3_MID"),
+                ("SHORT", "T1_MOST_LIQUID"),
+                ("EXACT", "T2_LIQUID"),
+                ("PENNY", "T1_MOST_LIQUID"),
+                ("ILLIQ", "T4_ILLIQUID"),
+                ("RISER", "T1_MOST_LIQUID"),
+                ("ZOMBIE", "T1_MOST_LIQUID"),
+            ]
+        ],
+    )
     out = JM.oversold_picks("US")
     syms = list(out["symbol"])
-    assert "SHORT" not in syms                         # < 100 bars
-    assert "EXACT" in syms                             # exactly 100 bars is enough
-    assert "PENNY" not in syms                         # US $2 floor
+    assert "SHORT" not in syms  # < 100 bars
+    assert "EXACT" in syms  # exactly 100 bars is enough
+    assert "PENNY" not in syms  # US $2 floor
     assert "ILLIQ" not in syms and "NOTIER" not in syms
-    assert "RISER" not in syms                         # RSI not < 30
-    assert "ZOMBIE" not in syms                        # all-down RSI == 0 is excluded (rsi > 2)
+    assert "RISER" not in syms  # RSI not < 30
+    assert "ZOMBIE" not in syms  # all-down RSI == 0 is excluded (rsi > 2)
     assert {"DEEP", "SHALLOW", "EXACT"} <= set(syms)
     # most-oversold first, labelled with one decimal
     px = panel(series)
@@ -124,14 +161,22 @@ def test_oversold_picks_selection_rules(env):
 
 
 def test_oversold_floor_only_applies_to_us(env):
-    closes = beaten_down(120, 7, start=1.5)             # ends well under $2
+    closes = beaten_down(120, 7, start=1.5)  # ends well under $2
     panel({"PENNY.KS": closes}).to_parquet(env / "KR.parquet", index=False)
-    write_workbook(env, "korea_scan", "korea_market_scan_1.xlsx",
-                   [{"YF_Ticker": "PENNY.KS", "Liquidity_Tier": "T1_MOST_LIQUID", "Name": "Penny"}])
+    write_workbook(
+        env,
+        "korea_scan",
+        "korea_market_scan_1.xlsx",
+        [{"YF_Ticker": "PENNY.KS", "Liquidity_Tier": "T1_MOST_LIQUID", "Name": "Penny"}],
+    )
     assert list(JM.oversold_picks("KR")["symbol"]) == ["PENNY.KS"]
     panel({"PENNY": closes}).to_parquet(env / "US.parquet", index=False)
-    write_workbook(env, "us_full_scan", "us_full_scan_1.xlsx",
-                   [{"Symbol": "PENNY", "Liquidity_Tier": "T1_MOST_LIQUID"}])
+    write_workbook(
+        env,
+        "us_full_scan",
+        "us_full_scan_1.xlsx",
+        [{"Symbol": "PENNY", "Liquidity_Tier": "T1_MOST_LIQUID"}],
+    )
     assert JM.oversold_picks("US").empty
 
 
@@ -139,34 +184,85 @@ def test_oversold_floor_is_inclusive_at_two_dollars(env):
     base = beaten_down(120, 7)
     scale = 2.0 / base[-1]
     panel({"EDGE": base * scale}).to_parquet(env / "US.parquet", index=False)
-    write_workbook(env, "us_full_scan", "us_full_scan_1.xlsx",
-                   [{"Symbol": "EDGE", "Liquidity_Tier": "T1_MOST_LIQUID"}])
+    write_workbook(
+        env,
+        "us_full_scan",
+        "us_full_scan_1.xlsx",
+        [{"Symbol": "EDGE", "Liquidity_Tier": "T1_MOST_LIQUID"}],
+    )
     out = JM.oversold_picks("US")
     assert list(out["symbol"]) == ["EDGE"] and out["close"].iloc[0] == pytest.approx(2.0)
+
+
+def fake_rsi_panel(env, monkeypatch, targets, market="US"):
+    """Panel of 120-bar symbols whose final RSI is pinned to `targets[symbol]`."""
+    series = {s: beaten_down(120, 7) for s in targets}
+    df = panel(series)
+    panel_df = df.copy()
+    sym_of_label = {}
+    px = panel_df.sort_values(["Symbol", "Date"])
+    for label, sym in zip(px.index, px["Symbol"], strict=True):
+        sym_of_label[label] = sym
+    monkeypatch.setattr(
+        JM, "rsi14", lambda s: pd.Series(targets[sym_of_label[s.index[0]]], index=s.index)
+    )
+    df.to_parquet(env / f"{market}.parquet", index=False)
+    write_workbook(
+        env,
+        "us_full_scan",
+        "us_full_scan_1.xlsx",
+        [{"Symbol": s, "Liquidity_Tier": "T1_MOST_LIQUID"} for s in targets],
+    )
+
+
+def test_oversold_rsi_window_is_strictly_between_2_and_30(env, monkeypatch):
+    fake_rsi_panel(
+        env, monkeypatch, {"A": 2.0, "B": 2.0001, "C": 30.0, "D": 29.9999, "E": 1.9999, "F": 15.0}
+    )
+    out = JM.oversold_picks("US")
+    assert list(out["symbol"]) == ["B", "F", "D"]  # most oversold first
+    assert list(out["metric"]) == ["2.0 RSI", "15.0 RSI", "30.0 RSI"]
+
+
+def test_oversold_default_list_length_is_ten(env, monkeypatch):
+    assert JM.TOP_N == 10
+    fake_rsi_panel(env, monkeypatch, {f"S{i:02d}": 5.0 + i for i in range(14)})
+    out = JM.oversold_picks("US")
+    assert len(out) == 10 and list(out["symbol"])[0] == "S00" and "S10" not in set(out["symbol"])
 
 
 def test_oversold_caps_at_top_n(env, monkeypatch):
     monkeypatch.setattr(JM, "TOP_N", 2)
     series = {f"S{i}": beaten_down(120, 7 + i % 3, start=50.0 + i) for i in range(5)}
     panel(series).to_parquet(env / "US.parquet", index=False)
-    write_workbook(env, "us_full_scan", "us_full_scan_1.xlsx",
-                   [{"Symbol": s, "Liquidity_Tier": "T1_MOST_LIQUID"} for s in series])
+    write_workbook(
+        env,
+        "us_full_scan",
+        "us_full_scan_1.xlsx",
+        [{"Symbol": s, "Liquidity_Tier": "T1_MOST_LIQUID"} for s in series],
+    )
     assert len(JM.oversold_picks("US")) == 2
 
 
 # ── India momentum ────────────────────────────────────────────────────────────
 def write_nse(env, rows):
     pd.DataFrame(rows, columns=["TckrSymb", "ISIN", "SctySrs", "FinInstrmNm"]).to_parquet(
-        env / "nse.parquet", index=False)
+        env / "nse.parquet", index=False
+    )
 
 
 def test_india_equity_names_allowlist_by_isin_prefix(env):
-    write_nse(env, [("RELIANCE", "INE002A01018", "EQ", "Reliance Industries"),
-                    ("RELIANCE", "INE002A01018", "EQ", "dup"),
-                    ("GOLDETF", "INF204KB14I2", "EQ", "Gold ETF"),
-                    ("GSEC", "IN0020200013", "EQ", "G-Sec"),
-                    ("BE_STOCK", "INE111A01011", "BE", "Trade-to-trade"),
-                    ("TCS", "INE467B01029", "EQ", "TCS")])
+    write_nse(
+        env,
+        [
+            ("RELIANCE", "INE002A01018", "EQ", "Reliance Industries"),
+            ("RELIANCE", "INE002A01018", "EQ", "dup"),
+            ("GOLDETF", "INF204KB14I2", "EQ", "Gold ETF"),
+            ("GSEC", "IN0020200013", "EQ", "G-Sec"),
+            ("BE_STOCK", "INE111A01011", "BE", "Trade-to-trade"),
+            ("TCS", "INE467B01029", "EQ", "TCS"),
+        ],
+    )
     names = JM._india_equity_names()
     assert dict(names) == {"RELIANCE": "Reliance Industries", "TCS": "TCS"}
 
@@ -174,16 +270,33 @@ def test_india_equity_names_allowlist_by_isin_prefix(env):
 def india_panel(env):
     n = 300
     up = 100 * 1.002 ** np.arange(n)
-    rise_fall = np.concatenate([np.full(150, 100.0), np.linspace(100, 160, 100),
-                                np.linspace(160, 140, 50)])
+    rise_fall = np.concatenate(
+        [np.full(150, 100.0), np.linspace(100, 160, 100), np.linspace(160, 140, 50)]
+    )
     falling = np.linspace(100, 50, n)
-    series = {"UPTREND": up, "FADING": rise_fall, "FALLING": falling, "ETFX": up, "UNGATED": 50 * 1.0015 ** np.arange(n)}
+    series = {
+        "UPTREND": up,
+        "FADING": rise_fall,
+        "FALLING": falling,
+        "ETFX": up,
+        "UNGATED": 50 * 1.0015 ** np.arange(n),
+        # far below its 52w high and with a 6-month change of exactly zero: in neither list
+        "ZEROMOM": np.concatenate(
+            [np.linspace(100, 200, 100), np.linspace(200, 120, 74), np.full(126, 120.0)]
+        ),
+    }
     panel(series).to_parquet(env / "IN.parquet", index=False)
-    write_nse(env, [("UPTREND", "INE000000001", "EQ", "Up Trend Ltd"),
-                    ("FADING", "INE000000002", "EQ", "Fading Ltd"),
-                    ("FALLING", "INE000000003", "EQ", "Falling Ltd"),
-                    ("ETFX", "INF000000004", "EQ", "An ETF"),
-                    ("UNGATED", "INE000000005", "EQ", "Ungated Ltd")])
+    write_nse(
+        env,
+        [
+            ("UPTREND", "INE000000001", "EQ", "Up Trend Ltd"),
+            ("FADING", "INE000000002", "EQ", "Fading Ltd"),
+            ("FALLING", "INE000000003", "EQ", "Falling Ltd"),
+            ("ETFX", "INF000000004", "EQ", "An ETF"),
+            ("UNGATED", "INE000000005", "EQ", "Ungated Ltd"),
+            ("ZEROMOM", "INE000000006", "EQ", "Zero Mom Ltd"),
+        ],
+    )
     return series
 
 
@@ -191,7 +304,7 @@ def test_india_momentum_splits_near_high_and_momentum_lists(env):
     india_panel(env)
     out = JM.india_momentum_picks()
     rows = out.set_index("symbol")
-    assert list(out["symbol"]) == ["UPTREND", "UNGATED", "FADING"]            # near-high first, then momentum
+    assert list(out["symbol"]) == ["UPTREND", "UNGATED", "FADING"]  # near-high first, then momentum
     assert "ETFX" not in rows.index and "FALLING" not in rows.index
     assert rows.loc["UPTREND", "metric"] == "100.0% of 52w-hi"
     assert rows.loc["UPTREND", "name"] == "Up Trend Ltd"
@@ -203,15 +316,18 @@ def test_india_momentum_splits_near_high_and_momentum_lists(env):
 
 def test_india_momentum_workbook_acts_as_liquidity_gate(env):
     india_panel(env)
-    write_workbook(env, "indian_full_scan", "indian_full_scan_1.xlsx",
-                   [{"Symbol": "UPTREND"}, {"Symbol": "FADING"}])
+    write_workbook(
+        env,
+        "indian_full_scan",
+        "indian_full_scan_1.xlsx",
+        [{"Symbol": "UPTREND"}, {"Symbol": "FADING"}],
+    )
     assert list(JM.india_momentum_picks()["symbol"]) == ["UPTREND", "FADING"]
 
 
 def test_india_momentum_requires_a_close_within_five_percent_of_high(env):
-    n = 300
-    near = np.concatenate([np.linspace(100, 200, 280), np.linspace(200, 190.0, 20)])       # 95.0% of hi
-    far = np.concatenate([np.linspace(100, 200, 280), np.linspace(200, 189.9, 20)])        # 94.95%
+    near = np.concatenate([np.linspace(100, 200, 280), np.linspace(200, 190.0, 20)])  # 95.0% of hi
+    far = np.concatenate([np.linspace(100, 200, 280), np.linspace(200, 189.9, 20)])  # 94.95%
     panel({"NEAR": near, "FAR": far}).to_parquet(env / "IN.parquet", index=False)
     write_nse(env, [("NEAR", "INE000000001", "EQ", "n"), ("FAR", "INE000000002", "EQ", "f")])
     rows = JM.india_momentum_picks().set_index("symbol")
@@ -227,19 +343,59 @@ def write_combo(env, fname, rows):
 
 
 def test_overlay_filters_combos_and_formats(env):
-    write_combo(env, "factor_combo_india_252d.csv", [
-        {"combo": "piotroski", "testable": True, "n": 12345, "n_years": 9.4, "edge": 2.34,
-         "t": 0.876, "years_positive": 6},
-        {"combo": "roce_plus", "testable": False, "n": 1, "n_years": 1, "edge": 1, "t": 1,
-         "years_positive": 1},
-        {"combo": "momentum", "testable": True, "n": 5, "n_years": 5, "edge": 5, "t": 5,
-         "years_positive": 5}])
-    write_combo(env, "factor_combo_us_252d.csv", [
-        {"combo": "piotroski + roce_plus", "testable": True, "n": 999, "n_years": 8, "edge": -1.25,
-         "t": -0.5, "years_positive": 3}])
+    write_combo(
+        env,
+        "factor_combo_india_252d.csv",
+        [
+            {
+                "combo": "piotroski",
+                "testable": True,
+                "n": 12345,
+                "n_years": 9.4,
+                "edge": 2.34,
+                "t": 0.876,
+                "years_positive": 6,
+            },
+            {
+                "combo": "roce_plus",
+                "testable": False,
+                "n": 1,
+                "n_years": 1,
+                "edge": 1,
+                "t": 1,
+                "years_positive": 1,
+            },
+            {
+                "combo": "momentum",
+                "testable": True,
+                "n": 5,
+                "n_years": 5,
+                "edge": 5,
+                "t": 5,
+                "years_positive": 5,
+            },
+        ],
+    )
+    write_combo(
+        env,
+        "factor_combo_us_252d.csv",
+        [
+            {
+                "combo": "piotroski + roce_plus",
+                "testable": True,
+                "n": 999,
+                "n_years": 8,
+                "edge": -1.25,
+                "t": -0.5,
+                "years_positive": 3,
+            }
+        ],
+    )
     html = JM.fundamentals_overlay()
-    assert "<tr><td>India</td><td>piotroski</td><td>12,345</td><td>9y</td><td>+2.3pp</td>" \
-           "<td>0.88</td><td>6/9</td></tr>" in html
+    assert (
+        "<tr><td>India</td><td>piotroski</td><td>12,345</td><td>9y</td><td>+2.3pp</td>"
+        "<td>0.88</td><td>6/9</td></tr>" in html
+    )
     assert "<td>US</td><td>piotroski + roce_plus</td><td>999</td><td>8y</td><td>-1.2pp</td>" in html
     assert "roce_plus</td><td>1" not in html and "momentum" not in html
     assert "Read honestly" in html and "illiquidity premium" in html
@@ -247,20 +403,38 @@ def test_overlay_filters_combos_and_formats(env):
 
 def test_overlay_empty_without_files_or_rows(env):
     assert JM.fundamentals_overlay() == ""
-    write_combo(env, "factor_combo_us_252d.csv", [
-        {"combo": "piotroski", "testable": False, "n": 1, "n_years": 1, "edge": 1, "t": 1,
-         "years_positive": 1}])
+    write_combo(
+        env,
+        "factor_combo_us_252d.csv",
+        [
+            {
+                "combo": "piotroski",
+                "testable": False,
+                "n": 1,
+                "n_years": 1,
+                "edge": 1,
+                "t": 1,
+                "years_positive": 1,
+            }
+        ],
+    )
     assert JM.fundamentals_overlay() == ""
 
 
 # ── section / build ───────────────────────────────────────────────────────────
 def test_section_with_picks_truncates_names_and_formats_close():
-    picks = pd.DataFrame({"symbol": ["AAA", "BBB"], "name": ["N" * 50, ""],
-                          "metric": ["25.0 RSI", "28.1 RSI"], "close": [1234.5678, 2.0]})
+    picks = pd.DataFrame(
+        {
+            "symbol": ["AAA", "BBB"],
+            "name": ["N" * 50, ""],
+            "metric": ["25.0 RSI", "28.1 RSI"],
+            "close": [1234.5678, 2.0],
+        }
+    )
     html = JM.section("US", "🇺🇸 US", picks)
     assert "🇺🇸 US — RSI-14 oversold (&lt;30)" in html
     assert "edge <b>+1.85pp</b> vs equal-weight market, win rate 0.463" in html
-    assert f"<td style=\"color:#666\">{'N' * 34}</td>" in html and "N" * 35 not in html
+    assert f'<td style="color:#666">{"N" * 34}</td>' in html and "N" * 35 not in html
     assert "<td>25.0 RSI</td><td>1,234.57</td>" in html and "<td>2.00</td>" in html
     assert html.count("<tr><td") == 2
 
@@ -271,23 +445,27 @@ def test_section_empty_message_still_shows_evidence():
 
 
 def test_build_orders_sections_and_includes_caveats(env):
-    picks = {m: pd.DataFrame({"symbol": [f"{m}X"], "name": ["n"], "metric": ["m"], "close": [1.0]})
-             for m in ("IN", "US", "KR", "JP")}
+    picks = {
+        m: pd.DataFrame({"symbol": [f"{m}X"], "name": ["n"], "metric": ["m"], "close": [1.0]})
+        for m in ("IN", "US", "KR", "JP")
+    }
     html = JM.build(picks)
     assert f"Justified Brief — {date.today():%d %b %Y}" in html
-    order = [html.index(x) for x in ("🇮🇳 India", "🇺🇸 US", "🇰🇷 Korea", "🇯🇵 Japan",
-                                     "Excluded by evidence")]
+    order = [
+        html.index(x) for x in ("🇮🇳 India", "🇺🇸 US", "🇰🇷 Korea", "🇯🇵 Japan", "Excluded by evidence")
+    ]
     assert order == sorted(order)
     for k, _ in JM.EXCLUDED:
         assert f"<b>{k}</b>" in html
     assert JM.CAVEATS in html and html.rstrip().endswith("</div>")
-    assert "Fundamental overlay" not in html                      # no CSVs in the sandbox
+    assert "Fundamental overlay" not in html  # no CSVs in the sandbox
 
 
 # ── send ──────────────────────────────────────────────────────────────────────
 def fake_env(monkeypatch, values):
-    monkeypatch.setitem(sys.modules, "env_loader",
-                        types.SimpleNamespace(get=lambda k, d="": values.get(k, d)))
+    monkeypatch.setitem(
+        sys.modules, "env_loader", types.SimpleNamespace(get=lambda k, d="": values.get(k, d))
+    )
 
 
 def test_send_without_credentials_does_nothing(monkeypatch, capsys):
@@ -295,7 +473,7 @@ def test_send_without_credentials_does_nothing(monkeypatch, capsys):
     monkeypatch.setattr(smtplib, "SMTP_SSL", lambda *a, **k: pytest.fail("must not connect"))
     assert JM.send("<p>x</p>") is False
     assert "no creds — not sent" in capsys.readouterr().out
-    fake_env(monkeypatch, {"GMAIL_USER": "u@example.com"})                # password missing
+    fake_env(monkeypatch, {"GMAIL_USER": "u@example.com"})  # password missing
     assert JM.send("<p>x</p>") is False
 
 
@@ -317,6 +495,7 @@ def test_send_builds_html_message_and_defaults_recipient(monkeypatch):
 
         def send_message(self, msg):
             sent["msg"] = msg
+
     monkeypatch.setattr(smtplib, "SMTP_SSL", SMTP)
     fake_env(monkeypatch, {"GMAIL_USER": "me@example.com", "GMAIL_APP_PASSWORD": "pw"})
     assert JM.send("<p>hi</p>") is True
@@ -324,8 +503,10 @@ def test_send_builds_html_message_and_defaults_recipient(monkeypatch):
     msg = sent["msg"]
     assert msg["To"] == "me@example.com" and msg["From"] == "me@example.com"
     assert msg.get_content_type() == "text/html" and "Justified Brief" in msg["Subject"]
-    fake_env(monkeypatch, {"GMAIL_USER": "me@example.com", "GMAIL_APP_PASSWORD": "pw",
-                           "MAIL_TO": "you@example.com"})
+    fake_env(
+        monkeypatch,
+        {"GMAIL_USER": "me@example.com", "GMAIL_APP_PASSWORD": "pw", "MAIL_TO": "you@example.com"},
+    )
     JM.send("<p>hi</p>")
     assert sent["msg"]["To"] == "you@example.com"
 
@@ -336,20 +517,34 @@ def picks_for(*syms):
 
 
 def test_sync_watchlist_appends_only_new_pairs(env):
-    pd.DataFrame({"symbol": ["aaa", "OLD"], "market": ["us", "IN"],
-                  "status": ["held", "watch"], "note": ["a", "b"]}).to_csv(env / "watchlist.csv", index=False)
+    pd.DataFrame(
+        {
+            "symbol": ["aaa", "OLD"],
+            "market": ["us", "IN"],
+            "status": ["held", "watch"],
+            "note": ["a", "b"],
+        }
+    ).to_csv(env / "watchlist.csv", index=False)
     n = JM.sync_watchlist({"US": picks_for("AAA", "BBB", "BBB"), "IN": picks_for("AAA")})
-    assert n == 2                                                  # BBB (once) + AAA@IN; AAA@US exists
+    assert n == 2  # BBB (once) + AAA@IN; AAA@US exists
     wl = pd.read_csv(env / "watchlist.csv")
     assert list(wl["symbol"]) == ["aaa", "OLD", "BBB", "AAA"]
     new = wl.iloc[2:]
     assert list(new["status"]) == ["justified", "justified"] and list(new["market"]) == ["US", "IN"]
     assert new["note"].iloc[0] == f"30.0 RSI @ {date.today():%Y-%m-%d}"
-    assert list(wl.iloc[:2]["status"]) == ["held", "watch"]           # existing rows untouched
+    assert list(wl.iloc[:2]["status"]) == ["held", "watch"]  # existing rows untouched
+
+
+def test_sync_watchlist_matches_symbols_case_insensitively(env):
+    pd.DataFrame({"symbol": ["AAA"], "market": ["US"], "status": ["held"], "note": ["a"]}).to_csv(
+        env / "watchlist.csv", index=False
+    )
+    assert JM.sync_watchlist({"US": picks_for("aaa")}) == 0
+    assert len(pd.read_csv(env / "watchlist.csv")) == 1
 
 
 def test_sync_watchlist_noop_cases(env):
-    assert JM.sync_watchlist({"US": picks_for("A")}) == 0            # no watchlist.csv
+    assert JM.sync_watchlist({"US": picks_for("A")}) == 0  # no watchlist.csv
     (env / "watchlist.csv").write_text("symbol,market,status,note\nA,US,held,x\n")
     before = (env / "watchlist.csv").read_text()
     assert JM.sync_watchlist({"US": picks_for("A")}) == 0

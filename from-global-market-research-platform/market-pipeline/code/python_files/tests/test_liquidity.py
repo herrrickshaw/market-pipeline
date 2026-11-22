@@ -2,6 +2,7 @@
 
 All FX/network paths are faked; cache files live under tmp_path.
 """
+
 import datetime as dt
 import io
 import json
@@ -21,33 +22,51 @@ def frame(close, volume):
 
 
 # ── currency_for ──────────────────────────────────────────────────────────────
-@pytest.mark.parametrize("ticker,ccy", [
-    ("AAPL", "USD"), ("RELIANCE.NS", "INR"), ("VOD.L", "GBp"), ("7203.T", "JPY"),
-    ("ADS.DE", "EUR"), ("X.UNKNOWN", "USD"), ("A.B.L", "GBp"), ("TEVA.TA", "ILA"),
-])
+@pytest.mark.parametrize(
+    "ticker,ccy",
+    [
+        ("AAPL", "USD"),
+        ("RELIANCE.NS", "INR"),
+        ("VOD.L", "GBp"),
+        ("7203.T", "JPY"),
+        ("ADS.DE", "EUR"),
+        ("X.UNKNOWN", "USD"),
+        ("A.B.L", "GBp"),
+        ("TEVA.TA", "ILA"),
+    ],
+)
 def test_currency_for(ticker, ccy):
     assert L.currency_for(ticker) == ccy
 
 
 # ── turnover_usd_for ──────────────────────────────────────────────────────────
 def test_turnover_is_median_of_close_times_volume_over_rate():
-    df = frame([10, 10, 10], [100, 200, 1_000_000])          # product median = 2000
+    df = frame([10, 10, 10], [100, 200, 1_000_000])  # product median = 2000
     assert L.turnover_usd_for(df, "AAPL", {"USD": 1.0}) == 2000.0
     assert L.turnover_usd_for(df, "RELIANCE.NS", {"INR": 50.0}) == 40.0
 
 
 def test_subunit_quote_divided_by_100_before_fx():
-    df = frame([100.0] * 3, [10] * 3)                        # 1000 pence = 10 GBP
+    df = frame([100.0] * 3, [10] * 3)  # 1000 pence = 10 GBP
     assert L.turnover_usd_for(df, "VOD.L", {"GBP": 0.5}) == pytest.approx(20.0)
     # the GBp key itself is NOT an FX key
     assert L.turnover_usd_for(df, "VOD.L", {"GBp": 0.5}) == 0.0
 
 
-@pytest.mark.parametrize("df", [
-    None, "notaframe", pd.DataFrame({"Close": [1]}), pd.DataFrame({"Volume": [1]}),
-    frame([np.nan, np.nan], [1, 1]), frame([0, 0], [5, 5]), frame([-1, -1], [5, 5]),
-    frame(["a", "b"], ["c", "d"]), frame([], []),
-])
+@pytest.mark.parametrize(
+    "df",
+    [
+        None,
+        "notaframe",
+        pd.DataFrame({"Close": [1]}),
+        pd.DataFrame({"Volume": [1]}),
+        frame([np.nan, np.nan], [1, 1]),
+        frame([0, 0], [5, 5]),
+        frame([-1, -1], [5, 5]),
+        frame(["a", "b"], ["c", "d"]),
+        frame([], []),
+    ],
+)
 def test_turnover_zero_for_unusable_frames(df):
     assert L.turnover_usd_for(df, "AAPL", {"USD": 1.0}) == 0.0
 
@@ -72,15 +91,15 @@ def test_amihud_value_matches_hand_formula():
 
 
 def test_amihud_min_days_boundary():
-    assert L.amihud_illiq(growth_frame(61), "AAPL", {"USD": 1.0}) is not None   # 60 returns
-    assert L.amihud_illiq(growth_frame(60), "AAPL", {"USD": 1.0}) is None       # 59 returns
+    assert L.amihud_illiq(growth_frame(61), "AAPL", {"USD": 1.0}) is not None  # 60 returns
+    assert L.amihud_illiq(growth_frame(60), "AAPL", {"USD": 1.0}) is None  # 59 returns
     assert L.amihud_illiq(growth_frame(11), "AAPL", {"USD": 1.0}, min_days=10) is not None
     assert L.amihud_illiq(growth_frame(10), "AAPL", {"USD": 1.0}, min_days=10) is None
 
 
 def test_amihud_drops_zero_volume_days_instead_of_counting_zero_impact():
     df = growth_frame(61)
-    df.loc[df.index[-5:], "Volume"] = 0                     # 5 untraded days
+    df.loc[df.index[-5:], "Volume"] = 0  # 5 untraded days
     assert L.amihud_illiq(df, "AAPL", {"USD": 1.0}, min_days=60) is None
     assert L.amihud_illiq(df, "AAPL", {"USD": 1.0}, min_days=55) is not None
 
@@ -133,12 +152,18 @@ def usd(tv):
     return frame([1.0] * 3, [tv] * 3)
 
 
-@pytest.mark.parametrize("tv,tier", [
-    (12_000_000, "T1_MEGA"), (11_999_999, "T2_LARGE"),
-    (3_000_000, "T2_LARGE"), (2_999_999, "T3_MID"),
-    (600_000, "T3_MID"), (599_999, "T4_SMALL"),
-    (10_000, "T4_SMALL"),
-])
+@pytest.mark.parametrize(
+    "tv,tier",
+    [
+        (12_000_000, "T1_MEGA"),
+        (11_999_999, "T2_LARGE"),
+        (3_000_000, "T2_LARGE"),
+        (2_999_999, "T3_MID"),
+        (600_000, "T3_MID"),
+        (599_999, "T4_SMALL"),
+        (10_000, "T4_SMALL"),
+    ],
+)
 def test_scan_gate_tier_boundaries(tv, tier):
     got_tv, got_tier = L.scan_gate(usd(tv), "AAPL", {"USD": 1.0})
     assert got_tv == tv and got_tier == tier
@@ -174,6 +199,7 @@ def test_scan_floor_falls_back_when_adaptive_module_breaks(monkeypatch):
 
     def boom(m):
         raise RuntimeError("x")
+
     monkeypatch.setattr(AL, "scan_floor", boom)
     assert L._scan_floor("US") == 120_000.0
     assert L.scan_gate(usd(119_999), "AAPL", {"USD": 1.0})[1] is None
@@ -187,6 +213,7 @@ def test_scan_fx_requests_base_currencies_and_drops_missing(monkeypatch):
     def fake(need):
         seen["need"] = list(need)
         return {"USD": 1.0, "EUR": 0.9, "INR": 0, "GBP": 0.8}
+
     monkeypatch.setattr(L, "_fx_rates", fake)
     out = L.scan_fx()
     assert out == {"USD": 1.0, "EUR": 0.9, "GBP": 0.8}
@@ -215,6 +242,7 @@ def test_gate_empty_fx_degrades_to_usd_only(monkeypatch, ret):
 def test_gate_fx_exception_degrades_not_crashes(monkeypatch):
     def boom():
         raise RuntimeError("no net")
+
     monkeypatch.setattr(L, "_SCAN_FX", {})
     monkeypatch.setattr(L, "scan_fx", boom)
     assert L.gate(usd(5_000_000), "AAPL")[1] == "T2_LARGE"
@@ -226,6 +254,7 @@ def test_gate_scan_gate_exception_is_unknown(monkeypatch):
 
     def boom(*a, **k):
         raise ValueError("x")
+
     monkeypatch.setattr(L, "scan_gate", boom)
     assert L.gate(usd(1), "AAPL") == (0.0, "UNKNOWN")
 
@@ -247,8 +276,8 @@ def test_fx_cache_roundtrip_filters_falsy(fxcache):
 def test_fx_cache_write_failure_is_swallowed(tmp_path, monkeypatch):
     blocker = tmp_path / "file"
     blocker.write_text("x")
-    monkeypatch.setattr(L, "FX_CACHE_PATH", blocker / "fx.json")      # parent is a file
-    L._fx_write_cache({"INR": 1.0})                                     # must not raise
+    monkeypatch.setattr(L, "FX_CACHE_PATH", blocker / "fx.json")  # parent is a file
+    L._fx_write_cache({"INR": 1.0})  # must not raise
     assert L._fx_read_cache() == {}
 
 
@@ -277,12 +306,14 @@ def fake_urlopen(payload, seen=None, boom=False):
         if boom:
             raise OSError("down")
         return io.BytesIO(json.dumps(payload).encode())
+
     return _open
 
 
 def test_erapi_returns_only_needed_truthy(monkeypatch):
-    monkeypatch.setattr(urllib.request, "urlopen",
-                        fake_urlopen({"rates": {"INR": "90", "EUR": 0, "JPY": 150}}))
+    monkeypatch.setattr(
+        urllib.request, "urlopen", fake_urlopen({"rates": {"INR": "90", "EUR": 0, "JPY": 150}})
+    )
     assert L._fx_from_erapi(["INR", "EUR", "KRW"]) == {"INR": 90.0}
 
 
@@ -293,8 +324,9 @@ def test_erapi_failure_is_empty(monkeypatch):
 
 def test_frankfurter_url_and_filter(monkeypatch):
     seen = []
-    monkeypatch.setattr(urllib.request, "urlopen",
-                        fake_urlopen({"rates": {"INR": 91, "EUR": 0}}, seen))
+    monkeypatch.setattr(
+        urllib.request, "urlopen", fake_urlopen({"rates": {"INR": 91, "EUR": 0}}, seen)
+    )
     assert L._fx_from_frankfurter(["INR", "EUR"]) == {"INR": 91.0}
     assert seen == ["https://api.frankfurter.app/latest?from=USD&to=INR,EUR"]
 
@@ -326,24 +358,31 @@ def test_fred_inverted_series_skips_and_failures(monkeypatch):
     def _open(url, timeout=None):
         seen.append(url)
         if "DEXINUS" in url:
-            return io.BytesIO(json.dumps({"observations": [
-                {"value": "."}, {"value": "83.0"}]}).encode())
+            return io.BytesIO(
+                json.dumps({"observations": [{"value": "."}, {"value": "83.0"}]}).encode()
+            )
         if "DEXUSEU" in url:
             return io.BytesIO(json.dumps({"observations": [{"value": "1.25"}]}).encode())
         if "DEXJPUS" in url:
             return io.BytesIO(json.dumps({"observations": [{"value": "."}]}).encode())
-        raise OSError("boom")                                  # KRW
+        raise OSError("boom")  # KRW
+
     monkeypatch.setattr(urllib.request, "urlopen", _open)
     out = L._fx_from_fred(["INR", "EUR", "JPY", "KRW", "XXX"])
     assert out == {"INR": 83.0, "EUR": 1 / 1.25}
-    assert len(seen) == 4 and "series_id=DEXINUS" in seen[0]      # XXX never requested
+    assert len(seen) == 4 and "series_id=DEXINUS" in seen[0]  # XXX never requested
 
 
 # ── _fx_rates chain ───────────────────────────────────────────────────────────
 @pytest.fixture
 def nofetch(monkeypatch, fxcache):
-    monkeypatch.setitem(sys.modules, "yfinance", types.SimpleNamespace(
-        download=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline"))))
+    monkeypatch.setitem(
+        sys.modules,
+        "yfinance",
+        types.SimpleNamespace(
+            download=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("offline"))
+        ),
+    )
     for n in ("_fx_from_erapi", "_fx_from_frankfurter", "_fx_from_fred"):
         monkeypatch.setattr(L, n, lambda need: {})
 
@@ -363,7 +402,9 @@ def test_fx_rates_stops_at_first_complete_source(nofetch, monkeypatch, capsys):
 def test_fx_rates_falls_through_only_for_missing(nofetch, monkeypatch):
     got = {}
     monkeypatch.setattr(L, "_fx_from_erapi", lambda need: {"INR": 90.0})
-    monkeypatch.setattr(L, "_fx_from_frankfurter", lambda need: got.setdefault("f", need) and {"EUR": 0.9})
+    monkeypatch.setattr(
+        L, "_fx_from_frankfurter", lambda need: got.setdefault("f", need) and {"EUR": 0.9}
+    )
     out = L._fx_rates(["INR", "EUR"])
     assert got["f"] == ["EUR"] and out["EUR"] == 0.9 and out["INR"] == 90.0
 
@@ -390,8 +431,9 @@ def test_fx_rates_warns_loudly_when_nothing_available(nofetch, capsys):
 
 def test_fx_rates_yfinance_last_resort(nofetch, monkeypatch, capsys):
     close = pd.DataFrame({"INR=X": [89.0, 90.0, np.nan], "JPY=X": [0.0, 0.0, 0.0]})
-    monkeypatch.setitem(sys.modules, "yfinance", types.SimpleNamespace(
-        download=lambda tick, **k: {"Close": close}))
+    monkeypatch.setitem(
+        sys.modules, "yfinance", types.SimpleNamespace(download=lambda tick, **k: {"Close": close})
+    )
     out = L._fx_rates(["INR", "JPY", "EUR"])
     assert out["INR"] == 90.0 and "JPY" not in out and "EUR" not in out
     assert "yfinance:1" in capsys.readouterr().out
@@ -408,8 +450,13 @@ def index_env(tmp_path, monkeypatch):
 def seeds(n_ok=25):
     ok = frame(np.full(n_ok, 10.0), np.full(n_ok, 1000.0))
     return {
-        "US": {"OK": ok, "SHORT": ok.head(19), "NOVOL": pd.DataFrame({"Close": [1.0] * 30}),
-               "NONE": None, "ZERO": frame([1.0] * 30, [0.0] * 30)},
+        "US": {
+            "OK": ok,
+            "SHORT": ok.head(19),
+            "NOVOL": pd.DataFrame({"Close": [1.0] * 30}),
+            "NONE": None,
+            "ZERO": frame([1.0] * 30, [0.0] * 30),
+        },
         "UK": {"PENCE": frame(np.full(25, 100.0), np.full(25, 100.0))},
         "IN": {"RELI": ok},
     }
@@ -422,7 +469,7 @@ def test_build_index(index_env, monkeypatch):
     monkeypatch.setattr(L, "_fx_rates", lambda c: {"USD": 1.0, "GBP": 0.5, "INR": 0})
     idx = L.build_index(verbose=False)
     got = idx.set_index("Symbol")
-    assert list(idx["Symbol"]) == ["OK", "PENCE"]                    # IN has no rate; others dropped
+    assert list(idx["Symbol"]) == ["OK", "PENCE"]  # IN has no rate; others dropped
     assert got.loc["OK", "turnover_usd"] == 10_000.0 and got.loc["OK", "ltp"] == 10.0
     assert got.loc["PENCE", "turnover_usd"] == pytest.approx(10_000 / 100 / 0.5)
     assert got.loc["PENCE", "Market"] == "UK"
@@ -430,10 +477,15 @@ def test_build_index(index_env, monkeypatch):
 
 
 def test_build_index_twenty_bars_is_the_minimum(index_env, monkeypatch):
-    data = {"US": {"EXACT": frame(np.ones(20), np.full(20, 50.0)),
-                   "SHORT": frame(np.ones(19), np.full(19, 50.0))}}
-    monkeypatch.setitem(sys.modules, "screener_kit",
-                        types.SimpleNamespace(MARKETS=["US"], load=lambda m: data[m]))
+    data = {
+        "US": {
+            "EXACT": frame(np.ones(20), np.full(20, 50.0)),
+            "SHORT": frame(np.ones(19), np.full(19, 50.0)),
+        }
+    }
+    monkeypatch.setitem(
+        sys.modules, "screener_kit", types.SimpleNamespace(MARKETS=["US"], load=lambda m: data[m])
+    )
     monkeypatch.setattr(L, "_fx_rates", lambda c: {"USD": 1.0})
     assert list(L.build_index(verbose=False)["Symbol"]) == ["EXACT"]
 
@@ -442,15 +494,17 @@ def test_build_index_tail20_median(index_env, monkeypatch):
     # only the last 20 bars count, and the MEDIAN (not the mean) of them: one spike must not lift it
     vol = np.concatenate([np.full(10, 1e9), np.full(19, 100.0), [1e7]])
     data = {"US": {"A": frame(np.ones(30), vol)}}
-    monkeypatch.setitem(sys.modules, "screener_kit",
-                        types.SimpleNamespace(MARKETS=["US"], load=lambda m: data[m]))
+    monkeypatch.setitem(
+        sys.modules, "screener_kit", types.SimpleNamespace(MARKETS=["US"], load=lambda m: data[m])
+    )
     monkeypatch.setattr(L, "_fx_rates", lambda c: {"USD": 1.0})
     assert L.build_index(verbose=False)["turnover_usd"].iloc[0] == 100.0
 
 
 def test_build_index_empty_writes_nothing_and_verbose_prints(index_env, monkeypatch, capsys):
-    monkeypatch.setitem(sys.modules, "screener_kit",
-                        types.SimpleNamespace(MARKETS=["US"], load=lambda m: {}))
+    monkeypatch.setitem(
+        sys.modules, "screener_kit", types.SimpleNamespace(MARKETS=["US"], load=lambda m: {})
+    )
     monkeypatch.setattr(L, "_fx_rates", lambda c: {"USD": 1.0})
     assert L.build_index(verbose=True).empty
     assert not L.INDEX_PATH.exists()
@@ -475,23 +529,32 @@ def test_load_index_missing_is_empty(index_env):
     assert L._turnover_map() == {}
 
 
-@pytest.mark.parametrize("v,mkt,expected", [
-    (None, "US", "Unknown"),
-    (20_000_000, "US", "High"), (19_999_999, "US", "Medium"),
-    (2_000_000, "US", "Medium"), (1_999_999, "US", "Low"),
-    (10_000_000, None, "High"), (9_999_999, None, "Medium"),
-    (1_000_000, "ZZ", "Medium"), (999_999, "ZZ", "Low"),
-    (5_000_000, "IN", "High"), (500_000, "IN", "Medium"), (499_999, "IN", "Low"),
-])
+@pytest.mark.parametrize(
+    "v,mkt,expected",
+    [
+        (None, "US", "Unknown"),
+        (20_000_000, "US", "High"),
+        (19_999_999, "US", "Medium"),
+        (2_000_000, "US", "Medium"),
+        (1_999_999, "US", "Low"),
+        (10_000_000, None, "High"),
+        (9_999_999, None, "Medium"),
+        (1_000_000, "ZZ", "Medium"),
+        (999_999, "ZZ", "Low"),
+        (5_000_000, "IN", "High"),
+        (500_000, "IN", "Medium"),
+        (499_999, "IN", "Low"),
+    ],
+)
 def test_tier(v, mkt, expected):
     assert L.tier(v, mkt) == expected
 
 
 def test_liquid_symbols_filters_sorts_and_limits(index_env):
     write_index(ROWS)
-    assert L.liquid_symbols() == ["A", "B", "C"]                       # >= 1M default, desc
+    assert L.liquid_symbols() == ["A", "B", "C"]  # >= 1M default, desc
     assert L.liquid_symbols("IN") == ["C"]
-    assert L.liquid_symbols(min_usd=5e6) == ["A", "B"]                 # inclusive bound
+    assert L.liquid_symbols(min_usd=5e6) == ["A", "B"]  # inclusive bound
     assert L.liquid_symbols(min_usd=0, top=2) == ["A", "B"]
     assert L.liquid_symbols(market="IN", min_usd=0) == ["C", "D"]
 
@@ -508,7 +571,7 @@ def test_annotate_with_and_without_market(index_env):
     out = L.annotate(df)
     assert list(out["Liquidity"])[:2] == ["High", "Low"]
     assert out["Turnover_USD"].iloc[0] == 50e6 and pd.isna(out["Turnover_USD"].iloc[2])
-    assert "Turnover_USD" not in df.columns                              # input not mutated
+    assert "Turnover_USD" not in df.columns  # input not mutated
     nm = L.annotate(pd.DataFrame({"Symbol": ["B", "C"]}))
     assert list(nm["Liquidity"]) == ["Medium", "Medium"]
 
