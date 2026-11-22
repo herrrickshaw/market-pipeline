@@ -113,7 +113,7 @@ def test_build_forms_two_tight_clusters_with_capped_inverse_vol_weights():
         ws = [m["weight"] for m in b["members"]]
         assert ws == sorted(ws, reverse=True)  # sorted by weight desc
         assert sum(ws) == pytest.approx(1.0, abs=1e-3)
-        assert max(ws) <= pb.WEIGHT_CAP + 1e-6 + 0.05  # cap applied before renormalising
+        assert max(ws) <= 0.30  # similar vols -> near-equal weights
         assert b["name"] in ("IN · SecA", "IN · SecB")
         m0 = b["members"][0]
         assert m0["zone"] == "BUY" and m0["screen"].startswith("screen ") and m0["px_formation"] > 0
