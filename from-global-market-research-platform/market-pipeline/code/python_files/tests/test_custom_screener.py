@@ -148,6 +148,17 @@ def test_metrics_below_moving_average_flags_false():
     assert m["above_50dma"] is False and isinstance(m["above_50dma"], bool)
 
 
+def test_metrics_price_equal_to_the_average_is_not_above_it():
+    m = CS.compute_metrics(stock(ohlcv(np.full(250, 100.0))))
+    assert m["sma50"] == 100.0 and m["above_50dma"] is False
+    assert m["sma200"] == 100.0 and m["above_200dma"] is False
+
+
+def test_metrics_zero_prices_do_not_produce_distance_metrics():
+    m = CS.compute_metrics(stock(ohlcv(np.zeros(30), high=0.0, low=0.0)))
+    assert "dist_52w_high" not in m and "dist_52w_low" not in m
+
+
 def test_metrics_max_drawdown_is_worst_peak_to_trough():
     m = CS.compute_metrics(stock(ohlcv([100, 120, 60, 90, 100, 110])))
     assert m["max_drawdown"] == -50.0

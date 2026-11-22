@@ -37,11 +37,13 @@ def test_zero_or_negative_days_are_clamped_to_one():
 
 def test_overlap_is_equal_weighted_by_open_positions():
     ev = events([("2024-01-01", 2, 21.0),          # g = 1.21**0.5 - 1 = 0.10
-                 ("2024-01-02", 1, -10.0)])        # g = -0.10 on day 2 only
+                 ("2024-01-02", 1, 0.0)])          # g = 0 on day 2 only
     out = FS.book_daily(ev, cost_bps=0)
     assert list(out["n_positions"]) == [1, 2]
     assert out["ret"].iloc[0] == pytest.approx(0.10)
-    assert out["ret"].iloc[1] == pytest.approx((0.10 - 0.10) / 2)
+    assert out["ret"].iloc[1] == pytest.approx((0.10 + 0.0) / 2)             # mean, not sum
+    ev3 = events([("2024-01-01", 1, 21.0), ("2024-01-01", 1, 0.0), ("2024-01-01", 1, -19.0)])
+    assert FS.book_daily(ev3, 0)["ret"].iloc[0] == pytest.approx((0.21 + 0.0 - 0.19) / 3)
 
 
 def test_gap_days_are_cash_at_zero_return_and_zero_positions():
