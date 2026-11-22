@@ -1,9 +1,17 @@
 """factor_zscore_panel.py -- winsorising, per-market and sector-relative z-scores, coverage report."""
+import sys
+
 import numpy as np
 import pandas as pd
 import pytest
 
-import factor_zscore_panel as FZ
+# factor_zscore_panel prepends a hard-coded developer path to sys.path at import time; on a
+# machine where that directory exists it would shadow this repo's modules for every test
+# collected afterwards. Undo that side effect right after the import.
+_PATH_BEFORE = list(sys.path)
+import factor_zscore_panel as FZ  # noqa: E402
+
+sys.path[:] = _PATH_BEFORE
 
 
 @pytest.fixture(autouse=True)
