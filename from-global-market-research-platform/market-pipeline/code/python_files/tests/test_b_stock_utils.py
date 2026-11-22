@@ -1,5 +1,4 @@
 """Offline tests for stock_utils (cleaning, statement helpers, download wrapper)."""
-import types
 
 import numpy as np
 import pandas as pd
@@ -92,8 +91,13 @@ def test_clean_ohlcv_requires_close_column():
 def test_clean_ohlcv_sorts_dedups_keeps_last():
     idx = pd.to_datetime(["2024-01-03", "2024-01-01", "2024-01-01"])
     df = pd.DataFrame(
-        {"Open": [3, 1, 2], "High": [3, 1, 2], "Low": [3, 1, 2], "Close": [3.0, 1.0, 2.0],
-         "Volume": [1, 1, 1]},
+        {
+            "Open": [3, 1, 2],
+            "High": [3, 1, 2],
+            "Low": [3, 1, 2],
+            "Close": [3.0, 1.0, 2.0],
+            "Volume": [1, 1, 1],
+        },
         index=idx,
     )
     out = su.clean_ohlcv(df)
@@ -293,8 +297,14 @@ def test_extract_ticker_df_min_bars_applies_when_cleaning():
 # ---------------------------------------------------------------- misc small helpers
 @pytest.mark.parametrize(
     "msg,expected",
-    [("Too Many Requests", True), ("HTTP 429", True), ("Rate limited", True),
-     ("Invalid Crumb", True), ("timeout", False), ("", False)],
+    [
+        ("Too Many Requests", True),
+        ("HTTP 429", True),
+        ("Rate limited", True),
+        ("Invalid Crumb", True),
+        ("timeout", False),
+        ("", False),
+    ],
 )
 def test_is_rate_limited(msg, expected):
     assert su.is_rate_limited(Exception(msg)) is expected
@@ -302,9 +312,19 @@ def test_is_rate_limited(msg, expected):
 
 @pytest.mark.parametrize(
     "tkr,expected",
-    [("RELIANCE.NS", "RELIANCE"), ("X.BO", "X"), ("7203.T", "7203"), ("005930.KS", "005930"),
-     ("035720.KQ", "035720"), ("AAPL", "AAPL"), ("2330.TW", "2330.TW"), ("1513.TWO", "1513.TWO"),
-     ("ADS.DE", "ADS.DE"), ("A.NS.T", "A.NS"), (".T", "")],
+    [
+        ("RELIANCE.NS", "RELIANCE"),
+        ("X.BO", "X"),
+        ("7203.T", "7203"),
+        ("005930.KS", "005930"),
+        ("035720.KQ", "035720"),
+        ("AAPL", "AAPL"),
+        ("2330.TW", "2330.TW"),
+        ("1513.TWO", "1513.TWO"),
+        ("ADS.DE", "ADS.DE"),
+        ("A.NS.T", "A.NS"),
+        (".T", ""),
+    ],
 )
 def test_strip_suffix(tkr, expected):
     assert su._strip_suffix(tkr) == expected
@@ -395,12 +415,17 @@ def test_bulk_download_batches_period_and_suffix_strip(monkeypatch, nosleep, cap
     fake = _FakeYF([raw, raw])
     monkeypatch.setattr(su, "_YF_OK", True)
     monkeypatch.setattr(su, "yf", fake, raising=False)
-    out = su.bulk_download(["A.NS", "B.NS", "C.NS"], period="6mo", batch_size=2,
-                           sleep_between=0.25, min_bars=2)
+    out = su.bulk_download(
+        ["A.NS", "B.NS", "C.NS"], period="6mo", batch_size=2, sleep_between=0.25, min_bars=2
+    )
     assert set(out) == {"A", "B", "C"}
     assert [c[0] for c in fake.calls] == [["A.NS", "B.NS"], ["C.NS"]]
-    assert fake.calls[0][1] == {"auto_adjust": True, "threads": True, "progress": False,
-                                "period": "6mo"}
+    assert fake.calls[0][1] == {
+        "auto_adjust": True,
+        "threads": True,
+        "progress": False,
+        "period": "6mo",
+    }
     assert nosleep == [0.25]  # sleeps between batches only, not after the last
     text = capsys.readouterr().out
     assert "bulk_download: 3 tickers, 2 batches (size=2, period=6mo)" in text

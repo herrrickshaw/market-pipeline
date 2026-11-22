@@ -1,4 +1,5 @@
 """Offline tests for market_calendar, market_regime and market_tiers."""
+
 import datetime as dt
 import json
 import os
@@ -21,8 +22,13 @@ import market_tiers as mt  # noqa: E402
 # ================================================================ market_calendar
 @pytest.mark.parametrize(
     "raw,iso",
-    [("15-Jan-2026", "2026-01-15"), ("2026-01-15", "2026-01-15"),
-     ("15-January-2026", "2026-01-15"), ("  2026-01-15 ", "2026-01-15"), ("garbage ", "garbage")],
+    [
+        ("15-Jan-2026", "2026-01-15"),
+        ("2026-01-15", "2026-01-15"),
+        ("15-January-2026", "2026-01-15"),
+        ("  2026-01-15 ", "2026-01-15"),
+        ("garbage ", "garbage"),
+    ],
 )
 def test_parse(raw, iso):
     assert mc._parse(raw) == iso
@@ -87,14 +93,14 @@ def test_get_holidays_uses_fresh_cache_without_fetching(monkeypatch, cal):
     cal.write_text(json.dumps({"fetched": dt.date.today().isoformat(), "dates": ["2031-05-05"]}))
     monkeypatch.setattr(mc, "_fetch_live", lambda: pytest.fail("fetched"))
     h = mc.get_holidays()
-    assert "2031-05-05" in h and mc._FALLBACK <= h
+    assert "2031-05-05" in h and h >= mc._FALLBACK
 
 
 def test_get_holidays_refresh_ignores_cache_and_persists_live(monkeypatch, cal):
     cal.write_text(json.dumps({"fetched": dt.date.today().isoformat(), "dates": ["2031-05-05"]}))
     monkeypatch.setattr(mc, "_fetch_live", lambda: {"2031-06-06"})
     h = mc.get_holidays(refresh=True)
-    assert "2031-06-06" in h and "2031-05-05" not in h and mc._FALLBACK <= h
+    assert "2031-06-06" in h and "2031-05-05" not in h and h >= mc._FALLBACK
     saved = json.loads(cal.read_text())
     assert saved == {"fetched": dt.date.today().isoformat(), "dates": ["2031-06-06"]}
 
@@ -132,8 +138,13 @@ def test_trading_days_single_lookup(monkeypatch):
     monkeypatch.setattr(mc, "get_holidays", lambda refresh=False: calls.append(1) or {"2026-01-15"})
     days = [dt.date(2026, 1, d) for d in range(12, 20)]  # Mon..Mon
     got = mc.trading_days(days)
-    assert got == [dt.date(2026, 1, 12), dt.date(2026, 1, 13), dt.date(2026, 1, 14),
-                   dt.date(2026, 1, 16), dt.date(2026, 1, 19)]
+    assert got == [
+        dt.date(2026, 1, 12),
+        dt.date(2026, 1, 13),
+        dt.date(2026, 1, 14),
+        dt.date(2026, 1, 16),
+        dt.date(2026, 1, 19),
+    ]
     assert calls == [1]
 
 
@@ -146,14 +157,22 @@ def test_fallback_holidays_are_valid_iso_dates():
 def test_tiers_partition_and_cadence():
     assert mt.TIER1 == ["IN", "US"] and mt.TIER2 == ["EU", "JP", "KR"]
     assert not (set(mt.TIER3) & (set(mt.TIER1) | set(mt.TIER2)))
-    assert mt.TIER3 == sorted(mt.TIER3) and mt.TIER3
+    assert sorted(mt.TIER3) == mt.TIER3 and mt.TIER3
     assert mt.CADENCE == {1: "daily", 2: "daily", 3: "weekly"}
 
 
 @pytest.mark.parametrize(
     "m,tier,cad",
-    [("IN", 1, "daily"), ("us", 1, "daily"), ("Eu", 2, "daily"), ("jp", 2, "daily"),
-     ("KR", 2, "daily"), ("HK", 3, "weekly"), ("ZZ", 3, "weekly"), ("", 3, "weekly")],
+    [
+        ("IN", 1, "daily"),
+        ("us", 1, "daily"),
+        ("Eu", 2, "daily"),
+        ("jp", 2, "daily"),
+        ("KR", 2, "daily"),
+        ("HK", 3, "weekly"),
+        ("ZZ", 3, "weekly"),
+        ("", 3, "weekly"),
+    ],
 )
 def test_tier_of_and_cadence_of(m, tier, cad):
     assert mt.tier_of(m) == tier
@@ -205,14 +224,18 @@ def test_compute_too_short_history_unknown(monkeypatch):
 def test_compute_too_few_names_unknown(monkeypatch):
     # n > 4 required per day: four columns can never form an index
     assert _compute(monkeypatch, [0.002] * 300, n_cols=4)[0] == {
-        "trend": "unknown", "vol": "unknown"}
+        "trend": "unknown",
+        "vol": "unknown",
+    }
 
 
 def test_compute_vol_low_high_mid(monkeypatch):
     low = _compute(monkeypatch, _alt([0.02] * 250 + [0.001] * 80))[0]["vol"]
     high = _compute(monkeypatch, _alt([0.001] * 250 + [0.02] * 80))[0]["vol"]
     assert (low, high) == ("LOW", "HIGH")
-    amps = [0.01] * 100 + list(np.linspace(0.002, 0.02, 100)) + list(np.linspace(0.02, 0.002, 26)[1:])
+    amps = (
+        [0.01] * 100 + list(np.linspace(0.002, 0.02, 100)) + list(np.linspace(0.02, 0.002, 26)[1:])
+    )
     assert _compute(monkeypatch, _alt(amps))[0]["vol"] == "MID"
 
 
@@ -232,9 +255,19 @@ def test_get_regime_unknown_market_no_cache_io(monkeypatch, tmp_path):
     assert not (tmp_path / "r").exists()
 
 
-@pytest.mark.parametrize("alias,market",
-                         [("IN", "india"), ("eu", "europe"), ("JP", "japan"), ("kr", "korea"),
-                          ("CN", "china"), ("NSE", "india"), ("US", "us"), ("Japan", "japan")])
+@pytest.mark.parametrize(
+    "alias,market",
+    [
+        ("IN", "india"),
+        ("eu", "europe"),
+        ("JP", "japan"),
+        ("kr", "korea"),
+        ("CN", "china"),
+        ("NSE", "india"),
+        ("US", "us"),
+        ("Japan", "japan"),
+    ],
+)
 def test_get_regime_aliases(monkeypatch, tmp_path, alias, market):
     monkeypatch.setattr(mr, "CACHE", str(tmp_path / "c.json"))
     seen = []
@@ -247,7 +280,9 @@ def test_get_regime_computes_and_caches_for_the_day(monkeypatch, tmp_path):
     path = tmp_path / "sub" / "c.json"
     monkeypatch.setattr(mr, "CACHE", str(path))
     calls = []
-    monkeypatch.setattr(mr, "_compute", lambda m: calls.append(m) or {"trend": "bull", "vol": "LOW"})
+    monkeypatch.setattr(
+        mr, "_compute", lambda m: calls.append(m) or {"trend": "bull", "vol": "LOW"}
+    )
     today = str(dt.date.today())
     assert mr.get_regime("us") == {"trend": "bull", "vol": "LOW", "asof": today}
     assert mr.get_regime("us")["trend"] == "bull"
@@ -257,9 +292,14 @@ def test_get_regime_computes_and_caches_for_the_day(monkeypatch, tmp_path):
 
 def test_get_regime_stale_cache_recomputes_and_keeps_other_markets(monkeypatch, tmp_path):
     path = tmp_path / "c.json"
-    path.write_text(json.dumps({
-        "us": {"trend": "bear", "vol": "HIGH", "asof": "2000-01-01"},
-        "japan": {"trend": "chop", "vol": "MID", "asof": "2000-01-01"}}))
+    path.write_text(
+        json.dumps(
+            {
+                "us": {"trend": "bear", "vol": "HIGH", "asof": "2000-01-01"},
+                "japan": {"trend": "chop", "vol": "MID", "asof": "2000-01-01"},
+            }
+        )
+    )
     monkeypatch.setattr(mr, "CACHE", str(path))
     monkeypatch.setattr(mr, "_compute", lambda m: {"trend": "bull", "vol": "LOW"})
     assert mr.get_regime("us")["trend"] == "bull"

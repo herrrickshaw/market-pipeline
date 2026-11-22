@@ -1,4 +1,5 @@
 """Offline tests for ticker_exchange_map (suffix->venue, US spelling variants, build/main)."""
+
 import pandas as pd
 import pytest
 
@@ -8,8 +9,17 @@ import ticker_exchange_map as tem
 # ---------------------------------------------------------------- _suffix
 @pytest.mark.parametrize(
     "sym,expected",
-    [("RELIANCE.NS", "NS"), ("0700.hk", "HK"), ("1513.TWO", "TWO"), ("AAPL", None),
-     ("BRK-B", None), ("ABCD.WXYZ", None), ("A.B.DE", "DE"), ("", None), (".T", "T")],
+    [
+        ("RELIANCE.NS", "NS"),
+        ("0700.hk", "HK"),
+        ("1513.TWO", "TWO"),
+        ("AAPL", None),
+        ("BRK-B", None),
+        ("ABCD.WXYZ", None),
+        ("A.B.DE", "DE"),
+        ("", None),
+        (".T", "T"),
+    ],
 )
 def test_suffix(sym, expected):
     assert tem._suffix(sym) == expected
@@ -57,7 +67,11 @@ def _table():
 def test_us_lookup_first_matching_candidate_and_none():
     t = _table()
     assert tem._us_lookup(["ABR-PD", "aapl", "BRK-B", "ZZZ"], t, "Listing Exchange") == [
-        "N", "Q", "A", None]
+        "N",
+        "Q",
+        "A",
+        None,
+    ]
     assert tem._us_lookup(["AAPL"], t, "ETF") == ["Y"]
     assert tem._us_lookup([], t, "ETF") == []
 
@@ -96,15 +110,22 @@ def test_nasdaq_indexes_all_spellings_and_drops_tests(monkeypatch, tmp_path):
 def _universe(tmp_path):
     u = tmp_path / "uni"
     u.mkdir()
-    pd.DataFrame({"yf_symbol": ["RELIANCE.NS", "AAPL", "BRK-B"],
-                  "exchange": ["NSE/BSE", "NYSE/NASDAQ/AMEX", "NYSE/NASDAQ/AMEX"],
-                  "market_code": ["IN", "US", "US"], "market_name": ["India", "US", "US"]}
-                 ).to_csv(u / "validated_universe_flat.csv", index=False)
-    pd.DataFrame({"yf_symbol": ["RELIANCE.NS", "7203.T", "SPY", "ZZZ.UNKNOWN", "QQQ"],
-                  "exchange": ["DUP", "TSE", "NYSE/NASDAQ/AMEX", "?", "NYSE/NASDAQ/AMEX"],
-                  "market_code": ["XX", "JP", "US", "ZZ", "US"],
-                  "market_name": ["dup", "Japan", "US", "?", "US"]}
-                 ).to_csv(u / "global_universe_flat.csv", index=False)
+    pd.DataFrame(
+        {
+            "yf_symbol": ["RELIANCE.NS", "AAPL", "BRK-B"],
+            "exchange": ["NSE/BSE", "NYSE/NASDAQ/AMEX", "NYSE/NASDAQ/AMEX"],
+            "market_code": ["IN", "US", "US"],
+            "market_name": ["India", "US", "US"],
+        }
+    ).to_csv(u / "validated_universe_flat.csv", index=False)
+    pd.DataFrame(
+        {
+            "yf_symbol": ["RELIANCE.NS", "7203.T", "SPY", "ZZZ.UNKNOWN", "QQQ"],
+            "exchange": ["DUP", "TSE", "NYSE/NASDAQ/AMEX", "?", "NYSE/NASDAQ/AMEX"],
+            "market_code": ["XX", "JP", "US", "ZZ", "US"],
+            "market_name": ["dup", "Japan", "US", "?", "US"],
+        }
+    ).to_csv(u / "global_universe_flat.csv", index=False)
     return u
 
 
@@ -112,9 +133,14 @@ def _universe(tmp_path):
 def built(monkeypatch, tmp_path):
     monkeypatch.setattr(tem, "UNIVERSE", _universe(tmp_path))
     monkeypatch.setattr(tem, "NASDAQ_URL", str(_nasdaq_file(tmp_path)))
-    monkeypatch.setattr(tem, "_pg_reference", lambda: pd.DataFrame(
-        {"name": ["Reliance Industries"], "liquidity_tier": ["T1"], "turnover_usd": [1.5e6]},
-        index=pd.Index(["RELIANCE.NS"], name="ticker")))
+    monkeypatch.setattr(
+        tem,
+        "_pg_reference",
+        lambda: pd.DataFrame(
+            {"name": ["Reliance Industries"], "liquidity_tier": ["T1"], "turnover_usd": [1.5e6]},
+            index=pd.Index(["RELIANCE.NS"], name="ticker"),
+        ),
+    )
     return tmp_path
 
 

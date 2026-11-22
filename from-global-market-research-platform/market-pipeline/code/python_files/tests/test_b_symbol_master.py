@@ -1,4 +1,5 @@
 """Offline tests for symbol_master (name cleaning, deadline guard, builders, cache)."""
+
 import signal
 import sys
 import time
@@ -60,9 +61,11 @@ def test_deadline_socket_timeout_capped_at_30():
 
 
 def test_deadline_raises_source_timeout():
-    with pytest.raises(sm.SourceTimeout, match="slowsrc: exceeded 1s wall-clock deadline"):
-        with sm._deadline(1, "slowsrc"):
-            time.sleep(3)
+    with (
+        pytest.raises(sm.SourceTimeout, match="slowsrc: exceeded 1s wall-clock deadline"),
+        sm._deadline(1, "slowsrc"),
+    ):
+        time.sleep(3)
 
 
 def test_deadline_prints_when_over_half(monkeypatch, capsys):
@@ -245,8 +248,16 @@ def master(monkeypatch, tmp_path):
     path.parent.mkdir()
     monkeypatch.setattr(sm, "MASTER", path)
     monkeypatch.setattr(sm, "_LOOKUP", {})
-    for fn in ("_nse_names", "_bse_names", "_us_names", "_japan_names", "_korea_names",
-               "_china_names", "_hongkong_names", "_europe_names"):
+    for fn in (
+        "_nse_names",
+        "_bse_names",
+        "_us_names",
+        "_japan_names",
+        "_korea_names",
+        "_china_names",
+        "_hongkong_names",
+        "_europe_names",
+    ):
         monkeypatch.setattr(sm, fn, lambda *a, **k: [])
     return path
 
@@ -261,20 +272,31 @@ def test_build_master_empty_returns_empty_frame(master, capsys):
 def test_build_master_combines_dedups_and_names(master, monkeypatch):
     seen = {}
     monkeypatch.setattr(
-        sm, "_nse_names",
-        lambda: [{"symbol": "ADANIENT", "name": "ADANI ENTERPRISES LIMITED",
-                  "exchange": "NSE", "suffix": ".NS"},
-                 {"symbol": "ADANIENT", "name": "DUP", "exchange": "NSE", "suffix": ".NS"}],
+        sm,
+        "_nse_names",
+        lambda: [
+            {
+                "symbol": "ADANIENT",
+                "name": "ADANI ENTERPRISES LIMITED",
+                "exchange": "NSE",
+                "suffix": ".NS",
+            },
+            {"symbol": "ADANIENT", "name": "DUP", "exchange": "NSE", "suffix": ".NS"},
+        ],
     )
 
     def bse(nse_syms):
         seen["nse"] = nse_syms
-        return [{"symbol": "500325", "name": "RELIANCE IND LTD", "exchange": "BSE", "suffix": ".BO"}]
+        return [
+            {"symbol": "500325", "name": "RELIANCE IND LTD", "exchange": "BSE", "suffix": ".BO"}
+        ]
 
     monkeypatch.setattr(sm, "_bse_names", bse)
-    monkeypatch.setattr(sm, "_us_names",
-                        lambda: [{"symbol": "AAPL", "name": "Apple Inc", "exchange": "NASDAQ",
-                                  "suffix": ""}])
+    monkeypatch.setattr(
+        sm,
+        "_us_names",
+        lambda: [{"symbol": "AAPL", "name": "Apple Inc", "exchange": "NASDAQ", "suffix": ""}],
+    )
     df = sm.build_master()
     assert seen["nse"] == {"ADANIENT"}
     assert list(df.columns) == ["symbol", "name", "name_clean", "exchange", "suffix", "yf_symbol"]
@@ -293,25 +315,39 @@ def test_build_master_include_us_false_skips_us(master, monkeypatch):
         raise AssertionError("US must not be called")
 
     monkeypatch.setattr(sm, "_us_names", boom)
-    monkeypatch.setattr(sm, "_japan_names",
-                        lambda: [{"symbol": "7203.T", "name": "Toyota Motor", "exchange": "TSE",
-                                  "suffix": ""}])
+    monkeypatch.setattr(
+        sm,
+        "_japan_names",
+        lambda: [{"symbol": "7203.T", "name": "Toyota Motor", "exchange": "TSE", "suffix": ""}],
+    )
     df = sm.build_master(include_us=False)
     assert list(df.symbol) == ["7203.T"]
 
 
 def test_same_symbol_two_exchanges_kept_in_build(master, monkeypatch):
-    monkeypatch.setattr(sm, "_nse_names",
-                        lambda: [{"symbol": "X", "name": "X CORP", "exchange": "NSE", "suffix": ".NS"}])
-    monkeypatch.setattr(sm, "_us_names",
-                        lambda: [{"symbol": "X", "name": "X INC", "exchange": "NYSE", "suffix": ""}])
+    monkeypatch.setattr(
+        sm,
+        "_nse_names",
+        lambda: [{"symbol": "X", "name": "X CORP", "exchange": "NSE", "suffix": ".NS"}],
+    )
+    monkeypatch.setattr(
+        sm,
+        "_us_names",
+        lambda: [{"symbol": "X", "name": "X INC", "exchange": "NYSE", "suffix": ""}],
+    )
     assert len(sm.build_master()) == 2
 
 
 def _write_master(path, name="CO ONE"):
     pd.DataFrame(
-        {"symbol": ["AAA"], "name": [name], "name_clean": ["ONE"], "exchange": ["NSE"],
-         "suffix": [".NS"], "yf_symbol": ["AAA.NS"]}
+        {
+            "symbol": ["AAA"],
+            "name": [name],
+            "name_clean": ["ONE"],
+            "exchange": ["NSE"],
+            "suffix": [".NS"],
+            "yf_symbol": ["AAA.NS"],
+        }
     ).to_parquet(path, index=False)
 
 
@@ -368,9 +404,14 @@ def test_load_master_corrupt_file_builds(master, monkeypatch):
 # ---------------------------------------------------------------- lookups
 def test_name_lookups_first_duplicate_wins_and_unknown_blank(master, monkeypatch):
     m = pd.DataFrame(
-        {"symbol": ["AAA", "AAA", "BBB"], "name": ["First", "Second", "Bee"],
-         "name_clean": ["FIRST", "SECOND", "BEE"], "exchange": ["NSE", "NYSE", "NSE"],
-         "suffix": ["", "", ""], "yf_symbol": ["AAA", "AAA", "BBB"]}
+        {
+            "symbol": ["AAA", "AAA", "BBB"],
+            "name": ["First", "Second", "Bee"],
+            "name_clean": ["FIRST", "SECOND", "BEE"],
+            "exchange": ["NSE", "NYSE", "NSE"],
+            "suffix": ["", "", ""],
+            "yf_symbol": ["AAA", "AAA", "BBB"],
+        }
     )
     monkeypatch.setattr(sm, "load_master", lambda *a, **k: m)
     assert sm.name_for("AAA") == "First"
@@ -382,8 +423,16 @@ def test_name_lookups_first_duplicate_wins_and_unknown_blank(master, monkeypatch
 
 def test_lookup_is_built_once(master, monkeypatch):
     calls = []
-    m = pd.DataFrame({"symbol": ["A"], "name": ["N"], "name_clean": ["NN"],
-                      "exchange": ["NSE"], "suffix": [""], "yf_symbol": ["A"]})
+    m = pd.DataFrame(
+        {
+            "symbol": ["A"],
+            "name": ["N"],
+            "name_clean": ["NN"],
+            "exchange": ["NSE"],
+            "suffix": [""],
+            "yf_symbol": ["A"],
+        }
+    )
     monkeypatch.setattr(sm, "load_master", lambda *a, **k: calls.append(1) or m)
     sm.name_for("A")
     sm.name_for("A")
@@ -429,9 +478,17 @@ class _FakeNSE:
 
 def test_nse_names_walks_back_to_first_available_day(monkeypatch, tmp_path):
     _FakeNSE.asked = []
-    good = _csv(tmp_path, "n.csv", pd.DataFrame({
-        "SctySrs": ["EQ", "BE", "EQ"], "TckrSymb": [" TCS ", "JUNK", "INFY"],
-        "FinInstrmNm": ["TATA CONSULTANCY", "J", "INFOSYS LTD"]}))
+    good = _csv(
+        tmp_path,
+        "n.csv",
+        pd.DataFrame(
+            {
+                "SctySrs": ["EQ", "BE", "EQ"],
+                "TckrSymb": [" TCS ", "JUNK", "INFY"],
+                "FinInstrmNm": ["TATA CONSULTANCY", "J", "INFOSYS LTD"],
+            }
+        ),
+    )
     _FakeNSE.files = {0: None, 1: RuntimeError("x"), 2: good}
     monkeypatch.setitem(sys.modules, "nse", types.SimpleNamespace(NSE=_FakeNSE))
     rows = sm._nse_names()
@@ -469,10 +526,17 @@ class _FakeBSE:
 
 
 def test_bse_names_skips_dual_listed_and_non_equity_groups(monkeypatch, tmp_path):
-    p = _csv(tmp_path, "b.csv", pd.DataFrame({
-        "SctySrs": ["A", "Z", "XT", "B"],
-        "TckrSymb": ["500325", "999999", "500112", "RELIANCE"],
-        "FinInstrmNm": ["RIL BSE", "ZGROUP", "SBI BSE", "DUAL"]}))
+    p = _csv(
+        tmp_path,
+        "b.csv",
+        pd.DataFrame(
+            {
+                "SctySrs": ["A", "Z", "XT", "B"],
+                "TckrSymb": ["500325", "999999", "500112", "RELIANCE"],
+                "FinInstrmNm": ["RIL BSE", "ZGROUP", "SBI BSE", "DUAL"],
+            }
+        ),
+    )
     _FakeBSE.paths = [p]
     _FakeBSE.asked = 0
     monkeypatch.setitem(sys.modules, "bse", types.SimpleNamespace(BSE=_FakeBSE))
@@ -518,7 +582,9 @@ def test_japan_names_include_list_and_code_padding(monkeypatch):
             return WS()
 
     xlrd = types.SimpleNamespace(open_workbook=lambda file_contents: WB())
-    req = types.SimpleNamespace(get=lambda url, timeout: types.SimpleNamespace(ok=True, content=b"x"))
+    req = types.SimpleNamespace(
+        get=lambda url, timeout: types.SimpleNamespace(ok=True, content=b"x")
+    )
     monkeypatch.setitem(sys.modules, "xlrd", xlrd)
     monkeypatch.setitem(sys.modules, "requests", req)
     rows = sm._japan_names()
@@ -529,7 +595,9 @@ def test_japan_names_include_list_and_code_padding(monkeypatch):
 
 
 def test_japan_names_http_not_ok(monkeypatch):
-    req = types.SimpleNamespace(get=lambda url, timeout: types.SimpleNamespace(ok=False, content=b""))
+    req = types.SimpleNamespace(
+        get=lambda url, timeout: types.SimpleNamespace(ok=False, content=b"")
+    )
     monkeypatch.setitem(sys.modules, "xlrd", types.SimpleNamespace())
     monkeypatch.setitem(sys.modules, "requests", req)
     assert sm._japan_names() == []
@@ -539,21 +607,29 @@ def test_japan_names_errors_swallowed(monkeypatch):
     monkeypatch.setitem(sys.modules, "xlrd", None)
     assert sm._japan_names() == []
     monkeypatch.setitem(sys.modules, "xlrd", types.SimpleNamespace())
-    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(
-        get=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("net"))))
+    monkeypatch.setitem(
+        sys.modules,
+        "requests",
+        types.SimpleNamespace(get=lambda *a, **k: (_ for _ in ()).throw(RuntimeError("net"))),
+    )
     assert sm._japan_names() == []
 
 
 def test_korea_names_pads_codes_and_suffixes_by_board(monkeypatch):
     listings = {
-        "KOSPI": pd.DataFrame({"Code": ["5930", "000660", "000001"], "Name": ["Samsung", "Hynix", ""]}),
+        "KOSPI": pd.DataFrame(
+            {"Code": ["5930", "000660", "000001"], "Name": ["Samsung", "Hynix", ""]}
+        ),
         "KOSDAQ": pd.DataFrame({"Symbol": ["35720"], "Name": ["Kakao"]}),
     }
     fdr = types.SimpleNamespace(StockListing=lambda m: listings[m])
     monkeypatch.setitem(sys.modules, "FinanceDataReader", fdr)
     rows = sm._korea_names()
     assert [(r["symbol"], r["exchange"]) for r in rows] == [
-        ("005930.KS", "KOSPI"), ("000660.KS", "KOSPI"), ("035720.KQ", "KOSDAQ")]
+        ("005930.KS", "KOSPI"),
+        ("000660.KS", "KOSPI"),
+        ("035720.KQ", "KOSDAQ"),
+    ]
     assert all(r["suffix"] == "" for r in rows)
 
 
@@ -563,7 +639,9 @@ def test_korea_names_timeout_skips_that_board(monkeypatch, capsys):
             raise sm.SourceTimeout("slow")
         return pd.DataFrame({"Code": ["35720"], "Name": ["Kakao"]})
 
-    monkeypatch.setitem(sys.modules, "FinanceDataReader", types.SimpleNamespace(StockListing=listing))
+    monkeypatch.setitem(
+        sys.modules, "FinanceDataReader", types.SimpleNamespace(StockListing=listing)
+    )
     rows = sm._korea_names()
     assert [r["symbol"] for r in rows] == ["035720.KQ"]
     assert "skipping KOSPI" in capsys.readouterr().out
@@ -573,18 +651,24 @@ def test_korea_names_other_error_skips_silently_and_missing_lib(monkeypatch):
     def listing(m):
         raise ValueError("boom")
 
-    monkeypatch.setitem(sys.modules, "FinanceDataReader", types.SimpleNamespace(StockListing=listing))
+    monkeypatch.setitem(
+        sys.modules, "FinanceDataReader", types.SimpleNamespace(StockListing=listing)
+    )
     assert sm._korea_names() == []
     monkeypatch.setitem(sys.modules, "FinanceDataReader", None)
     assert sm._korea_names() == []
 
 
 def test_china_names_prefix_routing_and_bjse_excluded(monkeypatch):
-    df = pd.DataFrame({
-        "code": ["600519", "000001", "300750", "920000", "1", "ABCDEF", "688981"],
-        "name": ["Moutai", "PingAn", "CATL", "BJ", "ShortCode", "Alpha", "SMIC"],
-    })
-    monkeypatch.setitem(sys.modules, "akshare", types.SimpleNamespace(stock_info_a_code_name=lambda: df))
+    df = pd.DataFrame(
+        {
+            "code": ["600519", "000001", "300750", "920000", "1", "ABCDEF", "688981"],
+            "name": ["Moutai", "PingAn", "CATL", "BJ", "ShortCode", "Alpha", "SMIC"],
+        }
+    )
+    monkeypatch.setitem(
+        sys.modules, "akshare", types.SimpleNamespace(stock_info_a_code_name=lambda: df)
+    )
     rows = sm._china_names()
     got = {r["symbol"]: r["exchange"] for r in rows}
     assert got == {"600519.SS": "SSE", "000001.SZ": "SZSE", "300750.SZ": "SZSE", "688981.SS": "SSE"}
@@ -604,12 +688,26 @@ def test_china_names_errors(monkeypatch):
 
 
 def test_hongkong_names_filters_and_4_digit_codes(monkeypatch):
-    df = pd.DataFrame({
-        "Symbol": ["00700", "80700", "04332", "09988", "ABC", "", "00005", "04"],
-        "Name": ["Tencent", "Tencent RMB", "MSFT HDR", "Alibaba", "Bad", "Empty", "HSBC", "Edge"],
-    })
-    monkeypatch.setitem(sys.modules, "FinanceDataReader",
-                        types.SimpleNamespace(StockListing=lambda m: df if m == "HKEX" else None))
+    df = pd.DataFrame(
+        {
+            "Symbol": ["00700", "80700", "04332", "09988", "ABC", "", "00005", "04"],
+            "Name": [
+                "Tencent",
+                "Tencent RMB",
+                "MSFT HDR",
+                "Alibaba",
+                "Bad",
+                "Empty",
+                "HSBC",
+                "Edge",
+            ],
+        }
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "FinanceDataReader",
+        types.SimpleNamespace(StockListing=lambda m: df if m == "HKEX" else None),
+    )
     rows = sm._hongkong_names()
     assert [r["symbol"] for r in rows] == ["0700.HK", "9988.HK", "0005.HK"]
     assert all(r["exchange"] == "HKEX" and r["suffix"] == "" for r in rows)
