@@ -110,6 +110,8 @@ def test_talk_rows_filter_sort_cap_and_colour():
     assert "+0.90" in rows[0] and "<td>2</td>" in rows[0] and "-0.50" in rows[2]
     assert len(BM._talk_rows({"talk": talk}, cap=2)) == 2
     assert BM._talk_rows({}) == [] and BM._talk_rows({"talk": None}) == []
+    many = {f"S{i}": {"label": "POSITIVE", "score": float(i), "n_articles": 1} for i in range(15)}
+    assert len(BM._talk_rows({"talk": many})) == 10                  # default cap
 
 
 def test_news_rows_use_cap_default_and_swallow_errors(monkeypatch):
@@ -321,6 +323,17 @@ def test_fund_note_uses_median_not_newest(fund_store):
     write_fund(fund_store, 60, [20] * 59 + [0])
     out = BM._fund_coverage_note()
     assert "median 20d old" in out and "STALE" in out
+    write_fund(fund_store, 60, [1] * 59 + [30])                    # one ancient row must not look stale
+    out = BM._fund_coverage_note()
+    assert "median 1d old" in out and "STALE" not in out
+
+
+def test_fund_note_counts_only_rows_with_cfo_and_total_assets(fund_store):
+    write_fund(fund_store, 60, [1] * 60)
+    d = pd.read_parquet(fund_store / "IN_current.parquet")
+    d.loc[:19, "total_assets"] = np.nan                           # 40 usable names < 50
+    d.to_parquet(fund_store / "IN_current.parquet", index=False)
+    assert "still filling" in BM._fund_coverage_note()
 
 
 # ── darvas section ────────────────────────────────────────────────────────────
@@ -377,6 +390,9 @@ def test_darvas_counts_cap_and_label(fake_darvas, monkeypatch):
     assert "shown" not in exact and "ROWS 10 US" in exact
     default = BM._darvas_section("US")                            # default cap 30
     assert "ROWS 10 US" in default
+    fake_darvas["df"] = darvas_df(n1=40, n2=0)
+    big = BM._darvas_section("US")                                # default cap is 30
+    assert "top 30 of 40 shown" in big and "ROWS 30 US" in big
     assert "ZZ — Darvas" in BM._darvas_section("ZZ")              # unknown market keeps its code
 
 
@@ -572,6 +588,15 @@ def test_snapshot_dma_stance_and_cross(monkeypatch):
     assert "n/a · 200-DMA" in stoxx and "above 200" not in stoxx
 
 
+def test_snapshot_price_equal_to_average_is_not_above_it(monkeypatch):
+    flat = np.full(260, 100.0)
+    fake_yf(monkeypatch, {t: flat for t in ("^NSEI", "^GSPC", "^STOXX50E")})
+    set_regime(monkeypatch, "bull")
+    out = BM._market_snapshot_html()
+    assert "below 200-DMA (cautious)" in out and "below 50-DMA" in out
+    assert "above" not in out.replace("Prices", "")
+
+
 def test_snapshot_dma_window_boundaries(monkeypatch):
     for n, has50, has200 in ((49, False, False), (50, True, False), (199, True, False),
                              (200, True, True)):
@@ -647,6 +672,14 @@ def test_build_assembles_subject_text_html(build_env):
     assert "<b>t2</b></td><td>+40%" in other and "t1" not in other
     assert "z1" not in other and "S.Africa" not in other
     assert "<td>NIFTY</td><td>12.3</td><td>8.1</td><td>0.9</td>" in html
+
+
+def test_build_momentum_table_keeps_the_top_fifteen(build_env, monkeypatch):
+    big = pd.DataFrame({"Market": ["IN"] * 20, "Symbol": [f"s{i:02d}" for i in range(20)],
+                        "ret_126": np.arange(20.0), "rsi14": 50})
+    monkeypatch.setattr(BM.rga, "load_highlights", lambda: big)
+    _, _, html = BM.build()
+    assert "<td>s14</td>" in html and "<td>s15</td>" not in html
 
 
 def test_build_uses_combined_json_and_mood(build_env):

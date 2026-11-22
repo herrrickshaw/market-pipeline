@@ -62,6 +62,24 @@ def test_signal_low_tail_fires_on_new_minima(monkeypatch):
     assert not EYC._signal_dates(series([6, 5, 4, 3, 2, 1])).any()
 
 
+def test_signal_low_tail_does_not_fire_for_mid_range_values(monkeypatch):
+    monkeypatch.setattr(EYC, "WARMUP", 3)
+    s = series([10, 20, 30, 25])
+    assert not EYC._signal_dates(s, low=True).iloc[3]        # 25 is below the 95th pct but not the 5th
+
+
+@pytest.mark.parametrize("low", [False, True])
+def test_signal_ties_with_the_threshold_do_not_fire(monkeypatch, low):
+    monkeypatch.setattr(EYC, "WARMUP", 3)
+    assert not EYC._signal_dates(series([5.0] * 10), low=low).any()
+
+
+def test_signal_threshold_expands_over_all_history_not_a_trailing_window(monkeypatch):
+    monkeypatch.setattr(EYC, "WARMUP", 3)
+    s = series([100, 100, 100, 1, 2, 3, 4, 5, 6])
+    assert not EYC._signal_dates(s).iloc[3:].any()          # early 100s keep the threshold high
+
+
 def test_signal_threshold_uses_configured_percentile(monkeypatch):
     monkeypatch.setattr(EYC, "WARMUP", 5)
     monkeypatch.setattr(EYC, "PCTL", 0.5)
@@ -100,8 +118,10 @@ def test_score_hit_precision_recall():
 
 
 def test_score_lookahead_window_is_zero_to_252_days_inclusive():
-    assert EYC._score(fires_at(0), [IDX[252]], IDX)["hits"] == 1
-    assert EYC._score(fires_at(0), [IDX[253]], IDX)["hits"] == 0
+    inside = EYC._score(fires_at(0), [IDX[252]], IDX)
+    assert inside["hits"] == 1 and inside["bears_caught"] == 1
+    outside = EYC._score(fires_at(0), [IDX[253]], IDX)
+    assert outside["hits"] == 0 and outside["bears_caught"] == 0
     assert EYC._score(fires_at(10), [IDX[10]], IDX)["hits"] == 1             # same day counts
     assert EYC._score(fires_at(10), [IDX[9]], IDX)["hits"] == 0              # bear BEFORE the fire
 
@@ -191,6 +211,21 @@ def test_fit_rc_undefined_at_or_above_one(paths, capsys):
     assert "R/C undefined (a >= 1): 2 days (66.7%)" in capsys.readouterr().out
 
 
+def test_fit_flags_20y_fallback_only_when_the_30y_is_missing(paths):
+    both = yield_row("2020-01-02", 0.3)
+    both["20 Yr"] = 4.0                                      # 20Y present as well as 30Y
+    write_yields(paths, [both])
+    EYC.fit()
+    assert not pd.read_parquet(paths / "rc.parquet")["b0_from_20y"].iloc[0]
+
+
+def test_fit_slope_exactly_one_is_undefined_not_minus_infinity(paths):
+    write_yields(paths, [yield_row("2020-01-02", 1.0, b0=0.0)])      # B0 = 0 => a is exactly 1.0
+    EYC.fit()
+    d = pd.read_parquet(paths / "rc.parquet")
+    assert d["a"].iloc[0] == 1.0 and np.isnan(d["rc"].iloc[0])
+
+
 def test_fit_uses_20y_when_30y_discontinued(paths):
     r1 = yield_row("2004-01-02", 0.3)
     r1["20 Yr"], r1["30 Yr"] = 5.0, np.nan
@@ -273,6 +308,21 @@ def test_fit_2020_pinned_sigma_identifies_from_three_month_point(paths):
     assert len(d) == 1                                                    # no 3M point: skipped
     assert d["A"].iloc[0] == pytest.approx(0.4) and d["B"].iloc[0] == pytest.approx(0.0, abs=1e-9)
     assert d["sigma"].iloc[0] == pytest.approx(1.0)
+
+
+def test_fit_2020_pinned_sigma_with_nonzero_intercept_matches_closed_form(paths):
+    A_true, B_true = 0.3, 0.6
+    pd.DataFrame([row2020("2020-03-02", A_true, B_true)]).to_parquet(paths / "y.parquet", index=False)
+    d = EYC.fit_2020(pin_sigma_at_3m=True)
+    t = np.array([EYC.MATURITIES_2020[c] for c in EYC.MATURITIES_2020])
+    y = 4.0 + A_true * np.log(t) / t + B_true / t
+    yy = y - 4.0
+    keep = t != 3.0
+    x0 = np.log(t) / t
+    A = (x0[keep] @ yy[keep]) / (x0[keep] @ x0[keep])
+    B = (yy[t == 3.0][0] - A * np.log(3.0) / 3.0) * 3.0
+    assert d["A"].iloc[0] == pytest.approx(A) and d["B"].iloc[0] == pytest.approx(B)
+    assert d["sigma"].iloc[0] == pytest.approx(math.exp(-B / (1 - A)))
 
 
 def test_parameters():

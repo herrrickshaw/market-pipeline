@@ -109,7 +109,7 @@ def test_momentum_picks_top_quintile_with_floor_of_five():
 def test_momentum_skips_the_most_recent_month():
     R = pd.DataFrame(0.001, index=range(300), columns=[f"S{i}" for i in range(10)])
     R["S0"] = 0.0
-    R.loc[279:, "S0"] = 0.05                    # all of S0's gain is in the last 21 days
+    R.loc[279:, "S0"] = 0.10                    # all of S0's gain is in the last 21 days
     w = EB.w_momentum(R, None, None)
     assert w[0] == 0.0                          # 12-1 skip removes it
     assert (w > 0).sum() == 5
@@ -136,6 +136,10 @@ def test_perf_annualises_by_periods_per_year_not_252():
     nav = pd.Series(1.02 ** np.arange(0, 13))                           # +2%/month for a year
     assert EB.perf(nav, 12)["cagr"] == pytest.approx(1.02 ** 12 - 1)
     assert EB.perf(pd.Series(1.02 ** np.arange(0, 5)), 4)["cagr"] == pytest.approx(1.02 ** 4 - 1)
+    nav = pd.Series([1.0, 1.1, 1.0, 1.1, 1.0, 1.1, 1.0, 1.1, 1.0])
+    r = nav.pct_change().dropna()
+    assert EB.perf(nav, 4)["vol"] == pytest.approx(r.std() * np.sqrt(4))
+    assert EB.perf(nav, 12)["vol"] == pytest.approx(r.std() * np.sqrt(12))
 
 
 def test_perf_degenerate_inputs():

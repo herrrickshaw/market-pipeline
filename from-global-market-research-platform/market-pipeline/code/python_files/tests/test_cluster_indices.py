@@ -22,6 +22,13 @@ def test_within_corr_uses_mean_of_pairs_within_each_group():
     assert CI.within_corr(fwd, {"g": ["A", "B", "C"]}) == pytest.approx(-1 / 3)
 
 
+def test_within_corr_is_the_mean_not_the_sum_of_group_averages():
+    a = np.arange(100.0)
+    fwd = pd.DataFrame({"A": a, "B": a, "C": -a})
+    # group 1: +1 ; group 2 (A,B,C): -1/3  -> mean 1/3
+    assert CI.within_corr(fwd, {"g1": ["A", "B"], "g2": ["A", "B", "C"]}) == pytest.approx(1 / 3)
+
+
 def test_within_corr_skips_small_missing_and_degenerate_groups():
     a = np.arange(50.0)
     fwd = pd.DataFrame({"A": a, "B": a, "K": 1.0, "L": 2.0})
