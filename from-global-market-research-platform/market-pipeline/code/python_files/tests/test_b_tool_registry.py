@@ -1,4 +1,5 @@
 """Offline tests for tool_registry (decorators, discovery, safe execution)."""
+
 import sys
 import types
 
@@ -13,8 +14,7 @@ def fresh(monkeypatch):
     monkeypatch.setattr(tr, "_NEWS_SOURCES", {})
     monkeypatch.setattr(tr, "_ANALYSES", {})
     recorded = []
-    fake = types.SimpleNamespace(
-        record_analysis_run=lambda *a, **k: recorded.append((a, k)))
+    fake = types.SimpleNamespace(record_analysis_run=lambda *a, **k: recorded.append((a, k)))
     monkeypatch.setitem(sys.modules, "system_state", fake)
     return recorded
 
@@ -120,7 +120,7 @@ def test_analysis_registration_and_run_records_ok(fresh):
 
     assert tr.list_analyses() == ["count"]
     assert tr.run_analysis("count", [1, 2, 3]) == {"n": 3}
-    (args, kw), = fresh
+    ((args, kw),) = fresh
     assert args[:2] == ("count", "ok")
     assert kw["summary"] == {"n": 3} and kw["error"] is None and kw["duration_s"] >= 0
 
@@ -147,7 +147,7 @@ def test_run_analysis_error_recorded_and_reraised(fresh):
 
     with pytest.raises(ValueError, match="kaput"):
         tr.run_analysis("bad", None)
-    (args, kw), = fresh
+    ((args, kw),) = fresh
     assert args[:2] == ("bad", "error") and kw["summary"] is None and kw["error"] == "kaput"
 
 
@@ -155,7 +155,9 @@ def test_run_analysis_survives_persistence_failure(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("db down")
 
-    monkeypatch.setitem(sys.modules, "system_state", types.SimpleNamespace(record_analysis_run=boom))
+    monkeypatch.setitem(
+        sys.modules, "system_state", types.SimpleNamespace(record_analysis_run=boom)
+    )
     tr.analysis("ok")(lambda c: 42)
     assert tr.run_analysis("ok", None) == 42
     tr.analysis("bad")(lambda c: 1 / 0)
@@ -188,16 +190,28 @@ def test_register_builtin_screeners_wraps_specs(monkeypatch):
             return c == self.name
 
     mod = types.ModuleType("domain.screening.specifications")
-    for cls in ("DarvasBoxSpec", "GoldenCrossSpec", "PiotroskiSpec", "CoffeeCanSpec",
-                "MagicFormulaSpec", "BullCartelSpec"):
+    for cls in (
+        "DarvasBoxSpec",
+        "GoldenCrossSpec",
+        "PiotroskiSpec",
+        "CoffeeCanSpec",
+        "MagicFormulaSpec",
+        "BullCartelSpec",
+    ):
         setattr(mod, cls, lambda cls=cls: Spec(cls))
     for name in ("domain", "domain.screening"):
         monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
     monkeypatch.setitem(sys.modules, "domain.screening.specifications", mod)
     monkeypatch.setattr(sys, "path", list(sys.path))
     assert tr.register_builtin_screeners() == 6
-    assert tr.list_screeners() == ["darvas", "golden_cross", "piotroski", "coffee_can",
-                                   "magic_formula", "bull_cartel"]
+    assert tr.list_screeners() == [
+        "darvas",
+        "golden_cross",
+        "piotroski",
+        "coffee_can",
+        "magic_formula",
+        "bull_cartel",
+    ]
     assert tr._SCREENERS["darvas"].description == "explain DarvasBoxSpec"
     assert tr.run_screener("darvas", "DarvasBoxSpec") is True
     assert tr.run_screener("darvas", "other") is False

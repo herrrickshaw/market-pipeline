@@ -1,4 +1,5 @@
 """Offline tests for reference_data (Damodaran/French parsing, cache, lookups)."""
+
 import io
 import zipfile
 
@@ -26,9 +27,11 @@ def _xlsx(sheets):
 def _industry_sheet():
     pre = [["Damodaran preamble"], [None], ["Date: 2026"], [None], [None]]
     hdr = ["Industry Name", "Number of firms", "Current PE", "Trailing PE", "ROE", "Beta"]
-    body = [["Software (System & Application)", 300, 35.5, 40.0, 0.2, 1.2],
-            ["Bank (Money Center)", 20, 9.1, 10.0, 0.11, 0.9],
-            [None, 1, 1, 1, 1, 1]]
+    body = [
+        ["Software (System & Application)", 300, 35.5, 40.0, 0.2, 1.2],
+        ["Bank (Money Center)", 20, 9.1, 10.0, 0.11, 0.9],
+        [None, 1, 1, 1, 1, 1],
+    ]
     return pre + [hdr] + body
 
 
@@ -224,11 +227,13 @@ def test_french_factors_failures(monkeypatch):
 
 # ---------------------------------------------------------------- companies
 def _companies_xls():
-    df = pd.DataFrame({
-        "Company Name": ["Apple Inc.", "Reliance Industries", None],
-        "Exchange:Ticker": ["NasdaqGS:AAPL", "NSEI:RELIANCE", "X:Y"],
-        "Industry Group": ["Computers/Peripherals", "Oil/Gas (Integrated)", "Z"],
-    })
+    df = pd.DataFrame(
+        {
+            "Company Name": ["Apple Inc.", "Reliance Industries", None],
+            "Exchange:Ticker": ["NasdaqGS:AAPL", "NSEI:RELIANCE", "X:Y"],
+            "Industry Group": ["Computers/Peripherals", "Oil/Gas (Integrated)", "Z"],
+        }
+    )
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as w:
         df.to_excel(w, sheet_name="By company name", index=False)
@@ -275,8 +280,10 @@ def test_company_industry_no_universe(monkeypatch):
 
 # ---------------------------------------------------------------- aqr_links / info
 def test_aqr_links_dedup_sort_and_absolutize(monkeypatch):
-    html = ('<a href="/-/media/a.xlsx">a</a><a href="https://x.com/b.XLS">b</a>'
-            '<a href="/-/media/a.xlsx">dup</a><a href="/doc.pdf">p</a>')
+    html = (
+        '<a href="/-/media/a.xlsx">a</a><a href="https://x.com/b.XLS">b</a>'
+        '<a href="/-/media/a.xlsx">dup</a><a href="/doc.pdf">p</a>'
+    )
     monkeypatch.setattr(rd.requests, "get", lambda *a, **k: type("R", (), {"text": html})())
     assert rd.aqr_links() == ["https://www.aqr.com/-/media/a.xlsx", "https://x.com/b.XLS"]
 
