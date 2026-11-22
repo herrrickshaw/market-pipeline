@@ -93,6 +93,11 @@ def test_amihud_fx_direction():
     assert L.amihud_illiq(df, "VOD.L", {"GBP": 1.0}) == pytest.approx(base * 100)
 
 
+def test_amihud_zero_rate_is_unmeasurable_but_tiny_positive_rate_is_not():
+    assert L.amihud_illiq(growth_frame(61), "AAPL", {"USD": 0.0}) is None
+    assert L.amihud_illiq(growth_frame(61), "AAPL", {"USD": 1e-6}) is not None
+
+
 @pytest.mark.parametrize("fx", [{}, {"USD": 0}, {"USD": -1.0}])
 def test_amihud_none_on_bad_fx(fx):
     assert L.amihud_illiq(growth_frame(61), "AAPL", fx) is None
@@ -424,8 +429,18 @@ def test_build_index(index_env, monkeypatch):
     assert pd.read_parquet(L.INDEX_PATH).shape[0] == 2
 
 
+def test_build_index_twenty_bars_is_the_minimum(index_env, monkeypatch):
+    data = {"US": {"EXACT": frame(np.ones(20), np.full(20, 50.0)),
+                   "SHORT": frame(np.ones(19), np.full(19, 50.0))}}
+    monkeypatch.setitem(sys.modules, "screener_kit",
+                        types.SimpleNamespace(MARKETS=["US"], load=lambda m: data[m]))
+    monkeypatch.setattr(L, "_fx_rates", lambda c: {"USD": 1.0})
+    assert list(L.build_index(verbose=False)["Symbol"]) == ["EXACT"]
+
+
 def test_build_index_tail20_median(index_env, monkeypatch):
-    vol = np.concatenate([np.full(10, 1e9), np.full(20, 100.0)])
+    # only the last 20 bars count, and the MEDIAN (not the mean) of them: one spike must not lift it
+    vol = np.concatenate([np.full(10, 1e9), np.full(19, 100.0), [1e7]])
     data = {"US": {"A": frame(np.ones(30), vol)}}
     monkeypatch.setitem(sys.modules, "screener_kit",
                         types.SimpleNamespace(MARKETS=["US"], load=lambda m: data[m]))

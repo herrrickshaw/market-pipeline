@@ -63,6 +63,13 @@ def test_classify_execution_ceiling_is_inclusive_at_15_pct():
     assert not bool(AL.classify(adv_frame([10_000]), g2)["tradeable"].iloc[0])
 
 
+def test_classify_sub_dollar_adv_is_a_huge_finite_share_not_infinite():
+    out = AL.classify(adv_frame([0.5, 2.0]), AL.Gate("US", 1000, 1))
+    assert out["adv_pct"].iloc[0] == pytest.approx(1000 / 0.5 * 100)
+    assert out["adv_pct"].iloc[1] == pytest.approx(1000 / 2.0 * 100)
+    assert not out["tradeable"].any()
+
+
 def test_classify_nan_adv_is_untradeable():
     out = AL.classify(adv_frame([np.nan, 1e6]), AL.Gate("US", 1000, 1))
     assert list(out["tradeable"]) == [False, True]
