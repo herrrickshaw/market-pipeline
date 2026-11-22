@@ -283,6 +283,22 @@ def test_to_html_sections_colours_and_rows(DCR):
     assert 'color:#f57f17">NEUTRAL' in DCR.to_html(neutral)
 
 
+def many_picks(DCR, n=30):
+    picks = pd.DataFrame({"Symbol": [f"S{i:02d}" for i in range(n)], "Tier": "Single-Screen",
+                          "Screens": "Coffee", "Piotroski": 7.0})
+    return {"market": "IN", "generated": "t", "picks": picks, "mood": {}, "talk": {},
+            "convergence": pd.DataFrame()}
+
+
+def test_rendering_shows_at_most_25_picks(DCR, capsys):
+    rep = many_picks(DCR)
+    html = DCR.to_html(rep)
+    assert "<b>S24</b>" in html and "<b>S25</b>" not in html
+    DCR.print_report(rep)
+    out = capsys.readouterr().out
+    assert "S24" in out and "S25" not in out
+
+
 def test_to_html_empty_report(DCR):
     html = DCR.to_html(sample_report(DCR, empty=True))
     assert "No fundamental picks had news coverage today." in html
