@@ -56,7 +56,7 @@ def _s(**over):
 # ---------------------------------------------------------------- constants
 def test_test_names_and_presets_are_consistent():
     assert len(pp.TEST_NAMES) == 12 and len(set(pp.TEST_NAMES)) == 12
-    assert pp.PIOTROSKI_TESTS == pp.TEST_NAMES[:9] and pp.ROCE_TESTS == pp.TEST_NAMES[9:]
+    assert pp.TEST_NAMES[:9] == pp.PIOTROSKI_TESTS and pp.TEST_NAMES[9:] == pp.ROCE_TESTS
     for name, w in pp.PRESETS.items():
         assert set(w) == set(pp.TEST_NAMES), name
         assert all(v >= 0 for v in w.values())
@@ -121,10 +121,12 @@ def test_each_piotroski_test_can_fail_independently(test, over):
     if test != "9_asset_turnover_rising":
         others = [n for n in pp.PIOTROSKI_TESTS if n != test]
         # a single input change must not flip unrelated tests (except the coupled ones)
-        coupled = {"1_roa_positive": {"3_roa_improving", "4_accruals_cfo_gt_roa"},
-                   "3_roa_improving": {"4_accruals_cfo_gt_roa"},
-                   "2_cfo_positive": {"4_accruals_cfo_gt_roa"},
-                   "8_gross_margin_rising": set()}.get(test, set())
+        coupled = {
+            "1_roa_positive": {"3_roa_improving", "4_accruals_cfo_gt_roa"},
+            "3_roa_improving": {"4_accruals_cfo_gt_roa"},
+            "2_cfo_positive": {"4_accruals_cfo_gt_roa"},
+            "8_gross_margin_rising": set(),
+        }.get(test, set())
         for n in others:
             if n not in coupled:
                 assert r[n] is True, (test, n)
@@ -138,8 +140,13 @@ def test_f_score_counts_passes():
 
 def test_score_ties_are_not_passes():
     # strict inequalities for improvement tests
-    r = _s(**{"Net Income": [80, 80, 70, 60, 50], "Long Term Debt": [150, 150],
-              "Current Assets": [400, 400]})
+    r = _s(
+        **{
+            "Net Income": [80, 80, 70, 60, 50],
+            "Long Term Debt": [150, 150],
+            "Current Assets": [400, 400],
+        }
+    )
     assert r["3_roa_improving"] is False
     assert r["5_leverage_falling"] is False
     assert r["6_current_ratio_rising"] is False
@@ -194,7 +201,11 @@ def test_roce_needs_three_years_for_cv_and_trend():
     inc = _df({"EBIT": [150, 140], "Net Income": [100, 80]})
     bal = _df({"Total Assets": [1000, 1000], "Current Liabilities": [200, 200]})
     r = pp.score(_Ticker(inc, bal, _df({})))
-    assert r["roce_cv"] is None and r["11_roce_stable"] is None and r["12_roce_not_deteriorating"] is None
+    assert (
+        r["roce_cv"] is None
+        and r["11_roce_stable"] is None
+        and r["12_roce_not_deteriorating"] is None
+    )
     assert r["10_roce_level"] is True and r["plus_tested"] == 1 and r["plus_score"] == 1
     assert r["years"] == 2
 
@@ -224,8 +235,14 @@ def test_missing_lines_are_skipped_not_failed():
 
 def test_alias_line_names_are_accepted():
     inc = _df({"Operating Income": [150, 140, 130], "NetIncome": [100, 80, 70]})
-    bal = _df({"Total Assets": [1000] * 3, "Total Current Liabilities": [200] * 3,
-               "Total Current Assets": [500, 400], "LongTermDebt": [100, 150]})
+    bal = _df(
+        {
+            "Total Assets": [1000] * 3,
+            "Total Current Liabilities": [200] * 3,
+            "Total Current Assets": [500, 400],
+            "LongTermDebt": [100, 150],
+        }
+    )
     cfs = _df({"Total Cash From Operating Activities": [120, 100]})
     r = pp.score(_Ticker(inc, bal, cfs))
     assert r["1_roa_positive"] is True and r["6_current_ratio_rising"] is True
@@ -244,10 +261,16 @@ def test_unusable_statements_return_empty_dict():
     assert pp.score(_Ticker(pd.DataFrame(), pd.DataFrame(), pd.DataFrame())) == {}
     base = _good()
     assert pp.score(_Ticker(base.income_stmt.drop("EBIT"), base.balance_sheet, base.cashflow)) == {}
-    assert pp.score(_Ticker(base.income_stmt, base.balance_sheet.drop("Total Assets"),
-                            base.cashflow)) == {}
-    assert pp.score(_Ticker(base.income_stmt, base.balance_sheet.drop("Current Liabilities"),
-                            base.cashflow)) == {}
+    assert (
+        pp.score(_Ticker(base.income_stmt, base.balance_sheet.drop("Total Assets"), base.cashflow))
+        == {}
+    )
+    assert (
+        pp.score(
+            _Ticker(base.income_stmt, base.balance_sheet.drop("Current Liabilities"), base.cashflow)
+        )
+        == {}
+    )
 
 
 def test_needs_two_common_years():
@@ -256,8 +279,9 @@ def test_needs_two_common_years():
     assert pp.score(_Ticker(inc, bal, _df({}))) == {}
     # years only overlap on one date
     inc = _df({"EBIT": [150, 140]}, years=["2024", "2023"])
-    bal = _df({"Total Assets": [1000, 1000], "Current Liabilities": [200, 200]},
-              years=["2024", "2019"])
+    bal = _df(
+        {"Total Assets": [1000, 1000], "Current Liabilities": [200, 200]}, years=["2024", "2019"]
+    )
     assert pp.score(_Ticker(inc, bal, _df({}))) == {}
 
 
@@ -282,9 +306,23 @@ def test_total_is_none_unless_both_blocks_ran():
 # ---------------------------------------------------------------- _ran / _passed
 @pytest.mark.parametrize(
     "v,ran",
-    [(None, False), (float("nan"), False), (True, True), (False, True), (0, True), (1, True),
-     ("True", True), (" false ", True), ("1", True), ("0", True), ("nan", False), ("", False),
-     ("maybe", False), (0.0, True), (math.inf, True)],
+    [
+        (None, False),
+        (float("nan"), False),
+        (True, True),
+        (False, True),
+        (0, True),
+        (1, True),
+        ("True", True),
+        (" false ", True),
+        ("1", True),
+        ("0", True),
+        ("nan", False),
+        ("", False),
+        ("maybe", False),
+        (0.0, True),
+        (math.inf, True),
+    ],
 )
 def test_ran(v, ran):
     assert pp._ran(v) is ran
@@ -292,8 +330,20 @@ def test_ran(v, ran):
 
 @pytest.mark.parametrize(
     "v,passed",
-    [(True, True), (False, False), ("True", True), ("true", True), ("1", True), (" TRUE ", True),
-     ("False", False), ("0", False), ("no", False), (1, True), (0, False), (None, False)],
+    [
+        (True, True),
+        (False, False),
+        ("True", True),
+        ("true", True),
+        ("1", True),
+        (" TRUE ", True),
+        ("False", False),
+        ("0", False),
+        ("no", False),
+        (1, True),
+        (0, False),
+        (None, False),
+    ],
 )
 def test_passed(v, passed):
     assert pp._passed(v) is passed
@@ -301,15 +351,15 @@ def test_passed(v, passed):
 
 # ---------------------------------------------------------------- weigh
 def test_weigh_canonical_all_pass_and_all_fail():
-    r = {n: True for n in pp.TEST_NAMES}
+    r = dict.fromkeys(pp.TEST_NAMES, True)
     w = pp.weigh(r)
     assert w == {"raw": 12.0, "possible": 12.0, "pct": 100.0, "coverage": 1.0}
-    w = pp.weigh({n: False for n in pp.TEST_NAMES})
+    w = pp.weigh(dict.fromkeys(pp.TEST_NAMES, False))
     assert w["raw"] == 0.0 and w["pct"] == 0.0 and w["coverage"] == 1.0
 
 
 def test_weigh_skipped_tests_excluded_from_both_sides():
-    r = {n: True for n in pp.TEST_NAMES}
+    r = dict.fromkeys(pp.TEST_NAMES, True)
     r["7_no_dilution"] = None
     r["8_gross_margin_rising"] = float("nan")
     w = pp.weigh(r)
@@ -318,7 +368,7 @@ def test_weigh_skipped_tests_excluded_from_both_sides():
 
 
 def test_weigh_uses_weights_and_string_booleans():
-    r = {n: "True" for n in pp.TEST_NAMES}
+    r = dict.fromkeys(pp.TEST_NAMES, "True")
     r["11_roce_stable"] = "False"
     w = pp.weigh(r, "quality")
     total = sum(pp.PRESETS["quality"].values())
@@ -327,14 +377,14 @@ def test_weigh_uses_weights_and_string_booleans():
 
 
 def test_weigh_custom_dict_unlisted_tests_weigh_zero():
-    r = {n: True for n in pp.TEST_NAMES}
+    r = dict.fromkeys(pp.TEST_NAMES, True)
     r["2_cfo_positive"] = False
     w = pp.weigh(r, {"1_roa_positive": 1.0, "2_cfo_positive": 3.0})
     assert w["raw"] == 1.0 and w["possible"] == 4.0 and w["pct"] == 25.0 and w["coverage"] == 1.0
 
 
 def test_weigh_zero_weight_tests_do_not_count_as_possible():
-    r = {n: False for n in pp.TEST_NAMES}
+    r = dict.fromkeys(pp.TEST_NAMES, False)
     w = pp.weigh(r, "turnaround")
     assert w["possible"] == pytest.approx(sum(pp.PRESETS["turnaround"].values()))
     # zero-weight tests ran but contribute nothing; if only those ran, pct is undefined
@@ -361,16 +411,16 @@ def test_weigh_matches_score_output():
 
 
 def test_presets_rank_companies_differently():
-    steady = {n: False for n in pp.TEST_NAMES}
+    steady = dict.fromkeys(pp.TEST_NAMES, False)
     steady.update({"10_roce_level": False, "11_roce_stable": True, "7_no_dilution": True})
-    improving = {n: False for n in pp.TEST_NAMES}
+    improving = dict.fromkeys(pp.TEST_NAMES, False)
     improving.update({"3_roa_improving": True, "8_gross_margin_rising": True})
     assert pp.weigh(steady, "quality")["pct"] > pp.weigh(improving, "quality")["pct"]
     assert pp.weigh(improving, "turnaround")["pct"] > pp.weigh(steady, "turnaround")["pct"]
 
 
 def test_sweep_all_and_subset():
-    r = {n: True for n in pp.TEST_NAMES}
+    r = dict.fromkeys(pp.TEST_NAMES, True)
     assert set(pp.sweep(r)) == set(pp.PRESETS) and all(v == 100.0 for v in pp.sweep(r).values())
     assert list(pp.sweep(r, ["safety"])) == ["safety"]
     assert pp.sweep({}, ["quality"]) == {"quality": None}
