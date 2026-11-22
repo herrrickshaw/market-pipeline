@@ -247,7 +247,10 @@ def test_fit_2020_joint_ols_recovers_parameters(paths):
 
 
 def test_fit_2020_singularity_is_nan(paths):
-    pd.DataFrame([row2020("2020-03-02", 1.0, 0.5), row2020("2020-03-03", 1.5, 0.5)]
+    # A well above 1 gives p = 1 - A < 0 with a wide margin. A == 1.0 exactly sits ON the p == 0
+    # boundary, where the sign of the least-squares float error (BLAS/numpy build dependent) decides
+    # between NaN and a finite rc, which made this test fail on Python 3.13 in CI.
+    pd.DataFrame([row2020("2020-03-02", 1.2, 0.5), row2020("2020-03-03", 1.5, 0.5)]
                  ).to_parquet(paths / "y.parquet", index=False)
     d = EYC.fit_2020()
     assert d["rc"].isna().all() and d["sigma"].isna().all()
