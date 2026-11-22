@@ -117,6 +117,14 @@ def test_fetch_falls_back_to_whole_soup_without_top(monkeypatch):
     assert vb._fetch("X")["price"] == 77.0
 
 
+def test_fetch_reads_price_deep_in_the_header_text(monkeypatch):
+    _get(monkeypatch, _Resp(200, ""))
+    _fake_bs4(
+        monkeypatch, "word " * 60 + "₹ 321 +1.0% 14 Jul - close price"
+    )  # price after char 300
+    assert vb._fetch("X")["price"] == 321.0
+
+
 def test_fetch_truncates_header_text_to_400_chars(monkeypatch):
     _get(monkeypatch, _Resp(200, ""))
     _fake_bs4(monkeypatch, "x" * 400 + " ₹ 99")

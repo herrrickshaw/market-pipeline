@@ -91,7 +91,7 @@ def _nasdaq_file(tmp_path):
         "Y|BRK.B|Berkshire B|N||N|N|BRK-B|BRK.B\n"
         "Y|TEST|Test Co|Q|G|N|Y|TEST|\n"
         "Y|spy |SPDR|P||Y|N|SPY|SPY\n"
-        "Y|ZZ|First Row|N||N|N|ZZ|ZZ\n"
+        "Y|ZZ|First Row|N||N|N|ZZ|\n"
         "Y|YY|Second Row|Q||N|N|ZZ|YY\n"
         "Y||NoSymbol|Q|G|N|N||\n"
     )

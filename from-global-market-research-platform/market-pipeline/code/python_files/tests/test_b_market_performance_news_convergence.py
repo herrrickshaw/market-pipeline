@@ -70,6 +70,14 @@ def test_metrics_ytd_none_when_only_one_bar_this_year():
     assert m["YTD%"] is None and m["Return_1y%"] is not None
 
 
+def test_metrics_one_year_return_needs_only_two_bars_in_window():
+    old = pd.date_range("2021-01-04", periods=62, freq="W")
+    idx = old.append(pd.DatetimeIndex(["2024-06-03", "2024-12-31"]))
+    vals = np.r_[np.linspace(100, 110, 62), 150.0, 180.0]
+    m = mp._metrics(pd.Series(vals, index=idx))
+    assert m["Return_1y%"] == pytest.approx((180.0 / 150.0 - 1) * 100, abs=0.06)
+
+
 def test_metrics_constant_series_has_no_sharpe():
     m = mp._metrics(_series([50.0] * 80))
     assert m["Sharpe"] is None and m["Vol_ann%"] == 0.0 and m["MaxDD%"] == 0.0
@@ -272,6 +280,7 @@ def test_tokens_drop_stopwords_short_words_and_sort_longest_first():
     assert toks == ["Consultancy", "Tata", "TCS"]
     assert nc._tokens("ITC", "ITC") == ["ITC"]  # name token too short, symbol kept once
     assert set(nc._tokens("RELIANCE", "Reliance Industries Limited")) == {"Reliance", "RELIANCE"}
+    assert nc._tokens("XYZ", "Abb Corporation Infra") == ["Infra", "XYZ"]  # 3-letter words dropped
     toks = nc._tokens("X", "Abcd Efgh")
     assert toks[-1] == "X" and set(toks) == {"Abcd", "Efgh", "X"}
 

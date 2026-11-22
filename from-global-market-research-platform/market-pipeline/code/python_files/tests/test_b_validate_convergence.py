@@ -124,6 +124,9 @@ def test_mc_price_paths(monkeypatch):
         vc, "_get", lambda url, timeout=20: json.dumps({"data": {"pricecurrent": "101.5"}})
     )
     assert vc.mc_price("X") == {"ok": True, "price": 101.5, "code": "RI"}
+    both = json.dumps({"data": {"pricecurrent": 101.5, "HP": 999}})
+    monkeypatch.setattr(vc, "_get", lambda url, timeout=20: both)
+    assert vc.mc_price("X")["price"] == 101.5  # pricecurrent wins over the high-price field
     monkeypatch.setattr(vc, "_get", lambda url, timeout=20: json.dumps({"data": {"HP": 88}}))
     assert vc.mc_price("X")["price"] == 88.0  # falls back to HP
     monkeypatch.setattr(vc, "_get", lambda url, timeout=20: json.dumps({"data": {}}))
@@ -247,6 +250,7 @@ def test_run_samples_top_turnover_skips_bad_rows_and_rate_limits(monkeypatch, tm
     out = _run_json(capsys, sample=2)
     assert [r["symbol"] for r in out] == ["HIGH", "MID"]
     assert sleeps == [vc.RATE, vc.RATE]  # one pause per checked name
+    assert vc.RATE > 0  # the pause is real: this is a polite scraper
 
 
 def test_run_exit_code_only_one_when_rejected(monkeypatch, tmp_path, capsys):

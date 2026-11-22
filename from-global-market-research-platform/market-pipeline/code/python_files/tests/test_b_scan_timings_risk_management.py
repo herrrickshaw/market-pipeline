@@ -153,6 +153,35 @@ def test_backfill_without_done_line_has_no_tail_row_and_missing_banner_is_empty(
     assert st.backfill(bad) == []
 
 
+def test_backfill_uses_newest_artifact_per_step(home):
+    start = dt.datetime(2026, 7, 14, 0, 15, 0)
+    log = _log(
+        home, "daily_pipeline_20260714.log", "=== Daily pipeline Tue Jul 14 00:15:00 UTC 2026 ===\n"
+    )
+    _artifact(home, "indian_full_scan/indian_full_scan_a.xlsx", start + dt.timedelta(minutes=5))
+    _artifact(home, "indian_full_scan/indian_full_scan_b.xlsx", start + dt.timedelta(minutes=9))
+    _artifact(home, "indian_full_scan/indian_full_scan_c.xlsx", start + dt.timedelta(minutes=7))
+    assert [(r["step"], r["seconds"]) for r in st.backfill(log)] == [("[2/14]", 540)]
+
+
+def test_measured_end_marker_in_the_middle_is_skipped_but_still_bounds_previous_step(tmp_path):
+    p = _log(
+        tmp_path,
+        "m.log",
+        "[STEP] 1 t [1/14] A\n[STEP] 5 t [__end__] x\n[STEP] 9 t [2/14] B\n[STEP] 20 t [3/14] C\n",
+    )
+    assert [(r["step"], r["seconds"]) for r in st.measured(p)] == [
+        ("[1/14] A", 4),
+        ("[2/14] B", 11),
+    ]
+
+
+def test_collect_does_not_double_count_files_matched_by_two_globs(home, monkeypatch):
+    _log(home, "daily_pipeline_20260715.log", "[STEP] 10 t [1/14] A\n[STEP] 70 t [2/14] B\n")
+    monkeypatch.setattr(st, "LOG_GLOBS", [str(home / "daily_pipeline_*.log"), str(home / "*.log")])
+    assert len(st.collect()) == 1
+
+
 def test_collect_prefers_measured_falls_back_to_backfill_and_tags_rows(home, monkeypatch):
     monkeypatch.setattr(st, "LOG_GLOBS", [str(home / "daily_pipeline_*.log")])
     _log(home, "daily_pipeline_20260715.log", "[STEP] 10 t [1/14] A\n[STEP] 70 t [2/14] B\n")
@@ -254,6 +283,26 @@ def test_report_formats_times_orders_steps_and_totals(capsys):
     slow = out.split("SLOWEST STEPS")[1]
     assert slow.index("[2/14] B") < slow.index("[1/14] A")
     assert "max 62m 05s   runs=1" in slow and "max 1m 00s   runs=2" in slow
+
+
+def test_report_exactly_sixty_seconds_is_shown_as_a_minute(capsys):
+    st.report(
+        [{"run_date": "2026-07-15", "step": "[1/14] A", "seconds": 60, "source": "measured"}], 3
+    )
+    line = next(ln for ln in capsys.readouterr().out.splitlines() if "[1/14] A" in ln)
+    assert "1m 00s" in line and " 60s" not in line
+
+
+def test_report_slowest_ranks_by_worst_run_not_best(capsys):
+    rows = [
+        {"run_date": "2026-07-14", "step": "[1/14] SPIKY", "seconds": 1, "source": "measured"},
+        {"run_date": "2026-07-15", "step": "[1/14] SPIKY", "seconds": 500, "source": "measured"},
+        {"run_date": "2026-07-14", "step": "[2/14] STEADY", "seconds": 100, "source": "measured"},
+        {"run_date": "2026-07-15", "step": "[2/14] STEADY", "seconds": 110, "source": "measured"},
+    ]
+    st.report(rows, 1)
+    slow = capsys.readouterr().out.split("SLOWEST STEPS")[1]
+    assert "SPIKY" in slow and "STEADY" not in slow
 
 
 def test_report_slowest_limit_and_empty(capsys):
