@@ -404,3 +404,240 @@ def test_main_all_runs_every_section(main_env, monkeypatch):
     text = (main_env / "reports" / "r.md").read_text()
     for h in ("## 1.", "## 2.", "## 3.", "## 4.", "## 5."):
         assert h in text
+
+
+# ═══ differential / boundary tests added after mutation analysis ═════════════
+def sampen_reference(x, m=2, r_mult=0.2):
+    """Straightforward O(N^2) sample entropy with population std, <= tolerance."""
+    x = np.asarray(x, float)
+    x = x[np.isfinite(x)]
+    N = len(x)
+    r = r_mult * x.std()
+    def matches(mm):
+        vecs = [x[i:i + mm] for i in range(N - mm + 1)]
+        c = 0
+        for i in range(len(vecs)):
+            for j in range(len(vecs)):
+                if i != j and np.max(np.abs(vecs[i] - vecs[j])) <= r:
+                    c += 1
+        return c
+    B, A = matches(m), matches(m + 1)
+    return -math.log(A / B)
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2, 3, 4, 5])
+def test_sampen_matches_reference_on_noise(seed):
+    x = np.random.default_rng(seed).normal(size=60)
+    assert BE.sampen(x) == pytest.approx(sampen_reference(x))
+
+
+def test_sampen_tolerance_uses_population_std():
+    # one pair distance sits between 0.2*std(ddof=0) and 0.2*std(ddof=1)
+    base = np.array([0.0, 1.0] * 19 + [0.0, 0.0])
+    for v in np.linspace(0.080, 0.125, 400):
+        x = base.copy()
+        x[-1] = v
+        r0 = 0.2 * x.std()
+        r1 = 0.2 * x.std(ddof=1)
+        if r0 < v <= r1:
+            assert BE.sampen(x) == pytest.approx(sampen_reference(x))
+            return
+    pytest.fail("could not build a tolerance-sensitive series")
+
+
+def test_effective_te_p_value_counts_ties_as_exceedances(monkeypatch):
+    calls = iter([1.0] + [1.0] * 9 + [0.5] * 10)
+    monkeypatch.setattr(BE, "transfer_entropy", lambda s, d: next(calls))
+    raw, eff, p = BE.effective_te(np.arange(5.0), np.arange(5.0), n_sur=10)
+    # surrogates: 9 + 1 ... first call is raw; then 10 surrogates -> [1.0]*9 then 0.5
+    assert raw == 1.0
+    assert p == pytest.approx((9 + 1) / 11)                    # ties (>=) count
+    assert eff == pytest.approx(1.0 - (9 * 1.0 + 0.5) / 10)
+
+
+def test_effective_te_defaults_and_constants():
+    import inspect
+    assert BE.N_SURROGATE == 300 and BE.BINS == 3
+    assert inspect.signature(BE.effective_te).parameters["n_sur"].default == 300
+    assert inspect.signature(BE.transfer_entropy).parameters["bins"].default == 3
+
+
+def test_sampen_windows_step_exactly_21_rows():
+    d = make_frame("2007-01-01", 900, seed=3)
+    s = BE.run_sampen(d, [])
+    pos = d.index.get_indexer(s.index)
+    assert pos[0] == 251 and set(np.diff(pos)) == {21}
+
+
+def reference_selloff(d):
+    dy20 = d["y10y"].diff(20)
+    thr = dy20.quantile(0.95)
+    onsets, last = [], None
+    for dt in d.index[(dy20 > thr).fillna(False)]:
+        if last is None or (dt - last).days > 60:
+            onsets.append(dt)
+        last = dt
+    return thr, onsets
+
+
+def calendar_frame(n, shifts, seed=0):
+    """Daily calendar index; y10y = 3 + cumulative level shifts {day: size}."""
+    idx = pd.date_range("2012-01-01", periods=n, freq="D")
+    y = np.full(n, 3.0)
+    for day, size in shifts.items():
+        y[day:] += size
+    rng = np.random.default_rng(seed)
+    ret = rng.normal(0.0004, 0.01, n)
+    d = pd.DataFrame({"ret": ret, "bond_ret": -0.4 * ret + rng.normal(0, 0.004, n), "y10y": y}, index=idx)
+    d["dy10"] = d["y10y"].diff()
+    return d
+
+
+def episodes(out):
+    line = [x for x in out if "episodes" in x][0]
+    return int(line.split("**")[-2].split()[0]), line
+
+
+@pytest.mark.parametrize("second,expected", [(179, 1), (180, 2), (178, 1), (181, 2)])
+def test_selloff_declustering_gap_is_sixty_calendar_days(second, expected):
+    d = calendar_frame(1500, {100: 1.0, second: 1.0})
+    out = []
+    BE.run_selloff(d, out)
+    assert episodes(out)[0] == expected == len(reference_selloff(d)[1])
+
+
+def test_selloff_threshold_is_the_95th_percentile_of_20_day_changes():
+    sizes = [1.0 + 0.05 * k for k in range(12)]
+    shifts = {200 + 100 * k: s for k, s in enumerate(sizes)}
+    d = calendar_frame(3000, shifts)
+    thr, onsets = reference_selloff(d)
+    thr90 = d["y10y"].diff(20).quantile(0.90)
+    assert thr > 0 and thr90 == 0 and len(onsets) == 7        # config really separates q95 from q90
+    out = []
+    BE.run_selloff(d, out)
+    n, line = episodes(out)
+    assert n == 7 and f"(**+{thr * 100:.0f} bp**)" in line
+
+
+def test_selloff_regime_table_appears_from_five_episodes():
+    four = calendar_frame(2600, {s: 1.0 for s in (400, 800, 1200, 1600)})
+    five = calendar_frame(2600, {s: 1.0 for s in (400, 800, 1200, 1600, 2000)})
+    out4, out5 = [], []
+    BE.run_selloff(four, out4)
+    BE.run_selloff(five, out5)
+    assert "negative (bonds hedging)" not in "\n".join(out4)
+    assert "negative (bonds hedging)" in "\n".join(out5)
+    assert episodes(out5)[0] == 5
+
+
+def era_frame():
+    idx = pd.bdate_range("2010-01-01", "2026-12-31")
+    n = len(idx)
+    rng = np.random.default_rng(11)
+    ret = rng.normal(0, 0.01, n)
+    z = rng.normal(0, 0.01, n)
+    rho = np.where(idx < "2020-01-01", 0.03, np.where(idx < "2022-01-01", -0.30, 0.30))
+    bond = rho * ret + np.sqrt(1 - rho ** 2) * z
+    d = pd.DataFrame({"ret": ret, "bond_ret": bond, "y10y": 3.0 + 0.001 * rng.normal(size=n).cumsum()},
+                     index=idx)
+    d["dy10"] = d["y10y"].diff()
+    return d
+
+
+def test_selloff_era_labels_use_plus_minus_five_percent_band():
+    d = era_frame()
+    out = []
+    BE.run_selloff(d, out)
+    roll = d["bond_ret"].rolling(252).corr(d["ret"])
+    c1, c2, c3 = (roll.loc["2010-01-01":"2019-12-31"].mean(), roll.loc["2020-01-01":"2021-12-31"].mean(),
+                  roll.loc["2022-01-01":"2026-12-31"].mean())
+    assert 0.0 < c1 < 0.05 and c2 < -0.05 and c3 > 0.05              # config sits inside every band
+    text = "\n".join(out)
+    assert f"| 2010-2019 | {c1:+.3f} | neither, ~zero |" in text
+    assert f"| 2020-2021 | {c2:+.3f} | YES — negative corr |" in text
+    assert f"| 2022-2026 | {c3:+.3f} | NO — positive corr, they fall together |" in text
+
+
+def sampen_with_target_corr(monkeypatch, d, rho):
+    win, step = 252, 21
+    r = d["ret"].values
+    ends = list(range(win, len(r) + 1, step))
+    vols = np.array([np.std(r[e - win:e]) * np.sqrt(252) for e in ends])
+    zv = (vols - vols.mean()) / vols.std(ddof=1)
+    noise = np.random.default_rng(2).normal(size=len(vols))
+    noise = noise - np.polyval(np.polyfit(zv, noise, 1), zv)       # orthogonal to zv
+    zn = (noise - noise.mean()) / noise.std(ddof=1)
+    target = list(2.0 + rho * zv + math.sqrt(1 - rho ** 2) * zn)
+    it = iter(target)
+    monkeypatch.setattr(BE, "sampen", lambda x: next(it))
+    return target
+
+
+@pytest.mark.parametrize("rho,label", [(0.55, "NOT just inverted volatility"),
+                                       (-0.55, "NOT just inverted volatility"),
+                                       (0.65, "largely the inverse of vol"),
+                                       (-0.65, "largely the inverse of vol")])
+def test_sampen_vol_correlation_label_threshold(monkeypatch, rho, label):
+    d = make_frame("2007-01-01", 1100, seed=3)
+    sampen_with_target_corr(monkeypatch, d, rho)
+    out = []
+    s = BE.run_sampen(d, out)
+    assert s.sampen.corr(s.vol) == pytest.approx(rho, abs=1e-6)
+    assert f"{rho:+.3f}" in "\n".join(out) and label in "\n".join(out)
+
+
+def test_te_state_split_uses_top_20_percent_vol_and_400_row_floor(monkeypatch):
+    d = make_frame("2010-01-01", 2100, seed=5)
+    monkeypatch.setattr(BE, "effective_te", lambda s, t: (0.0, 0.1, 0.5))
+    out = []
+    BE.run_te(d, out)
+    vol = d["ret"].rolling(63).std()
+    hi = vol > vol.quantile(0.80)
+    n_turb, n_calm = int(hi.sum()), int((~hi).sum())
+    text = "\n".join(out)
+    assert f"| turbulent (top 20% vol) | {n_turb:,} |" in text
+    assert f"| calm (bottom 80% vol) | {n_calm:,} |" in text
+
+
+def test_te_full_sample_row_requires_400_rows(monkeypatch):
+    monkeypatch.setattr(BE, "effective_te", lambda s, t: (0.0, 0.1, 0.5))
+    for n, present in ((400, True), (399, False)):
+        out = []
+        BE.run_te(make_frame("2010-01-01", n, seed=5), out)
+        assert any(x.startswith(f"| full sample 1990-2026 | {n:,} |") for x in out) is present
+
+
+def test_te_equal_effective_flows_label_equity_leads(monkeypatch):
+    monkeypatch.setattr(BE, "effective_te", lambda s, t: (0.0, 0.3, 0.5))
+    out = []
+    BE.run_te(make_frame("2010-01-01", 500, seed=9), out)
+    assert [x for x in out if x.startswith("| full sample")][0].endswith("| equity leads |")
+
+
+def test_carry_funding_shock_line_matches_independent_computation():
+    d = make_frame("2010-01-01", 1600, seed=8)
+    out = []
+    BE.run_carry(d, out)
+    fwd = d["ret"].rolling(252).sum().shift(-252)
+    d2 = d.assign(fwd1y=fwd).dropna(subset=["fwd1y"])
+    shock = d2["y3m"].diff(63)
+    big = shock > shock.quantile(0.90)
+    line = [x for x in out if "top-decile" in x][0]
+    assert line == (f"- days after a top-decile 3m-rate rise (>{shock.quantile(0.90) * 100:.0f}bp/63d): "
+                    f"mean fwd 1y equity **{d2.loc[big, 'fwd1y'].mean() * 100:+.2f}%** "
+                    f"(n={int(big.sum()):,})")
+    inv_line = [x for x in out if "INVERTED" in x][0]
+    inv = d2["spread"] < 0
+    assert f"**{d2.loc[inv, 'fwd1y'].mean() * 100:+.2f}%** (n={int(inv.sum()):,})" in inv_line
+
+
+def test_main_requires_both_inputs(tmp_path, monkeypatch, capsys):
+    (tmp_path / "y.parquet").write_text("x")
+    monkeypatch.setattr(BE, "YIELDS", tmp_path / "y.parquet")
+    monkeypatch.setattr(BE, "SPX", tmp_path / "missing.parquet")
+    monkeypatch.setattr(sys, "argv", ["x", "--carry"])
+    assert BE.main() == 1
+    assert "entropic_yield_curve.py --fetch" in capsys.readouterr().out
+    monkeypatch.setattr(BE, "YIELDS", tmp_path / "missing2.parquet")
+    monkeypatch.setattr(BE, "SPX", tmp_path / "y.parquet")
+    assert BE.main() == 1

@@ -55,6 +55,16 @@ def test_redact_bare_secret_shapes(secret):
     assert out.startswith("see ") and out.endswith(" here")
 
 
+@pytest.mark.parametrize("token,redacted", [
+    ("ghp_" + "a" * 10, True), ("ghp_" + "a" * 9, False),
+    ("sk-" + "b" * 10, True), ("xoxb-" + "c" * 10, True), ("github_pat_" + "d" * 10, True),
+])
+def test_redact_prefixed_token_minimum_length(token, redacted):
+    out = DL._redact(f"x {token} y")
+    assert (token not in out) is redacted
+    assert ("<redacted>" in out) is redacted
+
+
 def test_redact_hex_length_boundary():
     assert DL._redact("a" * 31) == "a" * 31                         # 31 hex chars: kept
     assert DL._redact("a" * 32) == "<redacted>"
