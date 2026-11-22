@@ -1,0 +1,45 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  APP_DIR: from-global-market-research-platform/market-pipeline/code/python_files
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 matches the Dockerfile; 3.13 is a forward-compat check.
+        python-version: ["3.11", "3.13"]
+    defaults:
+      run:
+        working-directory: ${{ env.APP_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # The unit tests are offline (tests/conftest.py sandboxes the cache/log paths and stubs
+      # env_loader), so they need only this subset of requirements.txt, not the full market stack.
+      - run: pip install pytest pytest-cov pandas numpy scipy pyarrow requests lmdb openpyxl xlrd
+
+      # Only tests/ is run. The test_*.py files elsewhere in the repo are live-API scripts.
+      - run: pytest tests --cov=. --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.11'
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ${{ env.APP_DIR }}/coverage.xml
+          fail_ci_if_error: false
