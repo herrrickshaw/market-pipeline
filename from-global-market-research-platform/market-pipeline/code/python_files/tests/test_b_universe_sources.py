@@ -277,13 +277,25 @@ def test_from_damodaran_suffix_by_exchange_and_hk_padding(monkeypatch):
                 ("Hong Kong", "SEHK", "9988"),
                 ("Hong Kong", "XYZ", "1"),
                 ("Japan", "TSE", "7203"),
-                ("Hong Kong", "SEHK", None),
                 ("Hong Kong", "SEHK", ""),
                 ("Hong Kong", "SEHK", " 5 "),
             ]
         ),
     )
     assert us.from_damodaran("Hong Kong") == ["0005.HK", "0700.HK", "9988.HK"]
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="source bug: `if not tkr` does not catch NaN (float NaN is truthy), so a missing "
+    "Damodaran ticker becomes the literal string 'nan' (HK: '0nan.HK') in the universe",
+)
+def test_from_damodaran_skips_missing_tickers(monkeypatch):
+    _patch_damo(
+        monkeypatch, _damo([("Hong Kong", "SEHK", float("nan")), ("Hong Kong", "SEHK", "700")])
+    )
+    assert us.from_damodaran("Hong Kong") == ["0700.HK"]
 
 
 def test_from_damodaran_allowed_exchange_filter(monkeypatch):
