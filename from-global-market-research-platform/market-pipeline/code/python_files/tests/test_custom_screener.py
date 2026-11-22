@@ -1,4 +1,5 @@
 """custom_screener.py -- metric computation from OHLCV/fundamentals, rule evaluation, ranking."""
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -23,7 +24,7 @@ def stock(df=None, sym="AAA", mkt="IN", **fund):
     return StockData(sym, mkt, ohlcv=df, fundamentals=dict(fund))
 
 
-LINEAR = np.arange(100.0, 360.0)                      # 260 closes: 100 .. 359
+LINEAR = np.arange(100.0, 360.0)  # 260 closes: 100 .. 359
 
 
 # ── _rsi ──────────────────────────────────────────────────────────────────────
@@ -32,7 +33,7 @@ def test_rsi_all_up_is_100():
 
 
 def test_rsi_balanced_is_50():
-    close = pd.Series([10.0, 11.0] * 7 + [10.0])           # 14 diffs: 7 up, 7 down
+    close = pd.Series([10.0, 11.0] * 7 + [10.0])  # 14 diffs: 7 up, 7 down
     assert CS._rsi(close) == pytest.approx(50.0)
 
 
@@ -43,23 +44,23 @@ def test_rsi_hand_value():
 
 
 def test_rsi_needs_n_plus_one_points():
-    assert CS._rsi(pd.Series(np.arange(14.0))) is None            # 14 points
-    assert CS._rsi(pd.Series(np.arange(15.0))) == 100.0           # 15 points
+    assert CS._rsi(pd.Series(np.arange(14.0))) is None  # 14 points
+    assert CS._rsi(pd.Series(np.arange(15.0))) == 100.0  # 15 points
     assert CS._rsi(pd.Series(np.arange(6.0)), n=5) == 100.0
     assert CS._rsi(pd.Series(np.arange(5.0)), n=5) is None
 
 
 def test_rsi_uses_only_last_window():
     close = pd.Series([50.0, 40.0, 30.0] + list(np.arange(100.0, 120.0)))
-    assert CS._rsi(close) == 100.0                                  # early losses roll out
+    assert CS._rsi(close) == 100.0  # early losses roll out
 
 
 # ── _ret ──────────────────────────────────────────────────────────────────────
 def test_ret_boundary_and_value():
     s = pd.Series([100.0, 110.0, 121.0])
-    assert CS._ret(s, 2) == pytest.approx(21.0)                    # len == n+1 is enough
+    assert CS._ret(s, 2) == pytest.approx(21.0)  # len == n+1 is enough
     assert CS._ret(s, 1) == pytest.approx(10.0)
-    assert CS._ret(s, 3) is None                                   # len <= n
+    assert CS._ret(s, 3) is None  # len <= n
     assert CS._ret(pd.Series([], dtype=float), 1) is None
 
 
@@ -68,7 +69,7 @@ def test_ccc_formula():
     f = {"inventory": 100, "receivables": 50, "payables": 30, "cogs": 365, "revenue": 365}
     assert CS._ccc(f) == pytest.approx(100 + 50 - 30)
     f2 = {"inventory": 73, "receivables": 146, "payables": 36.5, "cogs": 730, "revenue": 365}
-    assert CS._ccc(f2) == pytest.approx(36.5 + 146 - 18.25)       # cogs and revenue differ
+    assert CS._ccc(f2) == pytest.approx(36.5 + 146 - 18.25)  # cogs and revenue differ
 
 
 def test_ccc_missing_denominators_contribute_zero():
@@ -119,17 +120,17 @@ def test_metrics_linear_series_hand_values():
     assert m["vol_ann"] == round(float(dr.std() * np.sqrt(252) * 100), 2)
     assert m["rsi14"] == 100.0
     assert m["dist_52w_high"] == round((360 - 359) / 360 * 100, 2) == 0.28
-    assert m["dist_52w_low"] == round((359 - 107) / 107 * 100, 2)      # window starts at 108-1
+    assert m["dist_52w_low"] == round((359 - 107) / 107 * 100, 2)  # window starts at 108-1
     assert m["avg_vol_20"] == 1000.0 and m["vol_ratio"] == 3.0
     assert m["atr14_pct"] == round(2 / 359 * 100, 2) == 0.56
 
 
 def test_metrics_history_gates():
-    m = CS.compute_metrics(stock(ohlcv(np.arange(100.0, 105.0))))        # 5 bars
+    m = CS.compute_metrics(stock(ohlcv(np.arange(100.0, 105.0))))  # 5 bars
     assert set(m) == {"ltp", "dist_52w_high", "dist_52w_low"}
-    m = CS.compute_metrics(stock(ohlcv(np.arange(100.0, 106.0))))        # 6 bars
+    m = CS.compute_metrics(stock(ohlcv(np.arange(100.0, 106.0))))  # 6 bars
     assert "vol_ann" in m and "max_drawdown" in m and "ret_21" not in m
-    m = CS.compute_metrics(stock(ohlcv(np.arange(100.0, 149.0))))        # 49 bars
+    m = CS.compute_metrics(stock(ohlcv(np.arange(100.0, 149.0))))  # 49 bars
     assert "sma50" not in m and "above_50dma" not in m and "rsi14" in m
     assert "sma50" in CS.compute_metrics(stock(ohlcv(np.arange(100.0, 150.0))))
     assert "sma200" not in CS.compute_metrics(stock(ohlcv(np.arange(100.0, 299.0))))
@@ -138,8 +139,8 @@ def test_metrics_history_gates():
 
 
 def test_metrics_return_horizon_boundaries():
-    assert "ret_21" not in CS.compute_metrics(stock(ohlcv(np.arange(100.0, 121.0))))   # 21 bars
-    assert "ret_21" in CS.compute_metrics(stock(ohlcv(np.arange(100.0, 122.0))))       # 22 bars
+    assert "ret_21" not in CS.compute_metrics(stock(ohlcv(np.arange(100.0, 121.0))))  # 21 bars
+    assert "ret_21" in CS.compute_metrics(stock(ohlcv(np.arange(100.0, 122.0))))  # 22 bars
 
 
 def test_metrics_below_moving_average_flags_false():
@@ -148,13 +149,24 @@ def test_metrics_below_moving_average_flags_false():
     assert m["above_50dma"] is False and isinstance(m["above_50dma"], bool)
 
 
+def test_metrics_price_equal_to_the_average_is_not_above_it():
+    m = CS.compute_metrics(stock(ohlcv(np.full(250, 100.0))))
+    assert m["sma50"] == 100.0 and m["above_50dma"] is False
+    assert m["sma200"] == 100.0 and m["above_200dma"] is False
+
+
+def test_metrics_zero_prices_do_not_produce_distance_metrics():
+    m = CS.compute_metrics(stock(ohlcv(np.zeros(30), high=0.0, low=0.0)))
+    assert "dist_52w_high" not in m and "dist_52w_low" not in m
+
+
 def test_metrics_max_drawdown_is_worst_peak_to_trough():
     m = CS.compute_metrics(stock(ohlcv([100, 120, 60, 90, 100, 110])))
     assert m["max_drawdown"] == -50.0
 
 
 def test_metrics_52w_window_only_last_252_bars():
-    close = np.concatenate([[1000.0], np.full(252, 100.0)])          # spike falls out of window
+    close = np.concatenate([[1000.0], np.full(252, 100.0)])  # spike falls out of window
     m = CS.compute_metrics(stock(ohlcv(close, high=close, low=close)))
     assert m["dist_52w_high"] == 0.0
 
@@ -175,17 +187,19 @@ def test_metrics_volume_rules():
     assert m["avg_vol_20"] == 100.0
     z = CS.compute_metrics(stock(ohlcv(base, volume=[0] * 30)))
     assert z["avg_vol_20"] == 0.0 and "vol_ratio" not in z
-    assert "avg_vol_20" not in CS.compute_metrics(stock(ohlcv(np.arange(100.0, 120.0),
-                                                              volume=[1] * 20)))       # <21 bars
-    assert "avg_vol_20" in CS.compute_metrics(stock(ohlcv(np.arange(100.0, 121.0),
-                                                          volume=[1] * 21)))
-    assert "avg_vol_20" not in CS.compute_metrics(stock(ohlcv(base)))                  # no Volume
+    assert "avg_vol_20" not in CS.compute_metrics(
+        stock(ohlcv(np.arange(100.0, 120.0), volume=[1] * 20))
+    )  # <21 bars
+    assert "avg_vol_20" in CS.compute_metrics(
+        stock(ohlcv(np.arange(100.0, 121.0), volume=[1] * 21))
+    )
+    assert "avg_vol_20" not in CS.compute_metrics(stock(ohlcv(base)))  # no Volume
 
 
 def test_metrics_atr_needs_hlc_and_15_bars():
-    c = np.arange(100.0, 114.0)                                       # 14 bars
+    c = np.arange(100.0, 114.0)  # 14 bars
     assert "atr14_pct" not in CS.compute_metrics(stock(ohlcv(c, high=1, low=1)))
-    c = np.arange(100.0, 115.0)                                       # 15 bars
+    c = np.arange(100.0, 115.0)  # 15 bars
     assert "atr14_pct" in CS.compute_metrics(stock(ohlcv(c, high=1, low=1)))
     assert "atr14_pct" not in CS.compute_metrics(stock(ohlcv(c, high=1)))
 
@@ -193,7 +207,7 @@ def test_metrics_atr_needs_hlc_and_15_bars():
 def test_metrics_atr_uses_gaps():
     c = np.full(20, 100.0)
     df = ohlcv(c, high=c + 1, low=c - 1)
-    df.loc[19, ["High", "Low", "Close"]] = [111.0, 109.0, 110.0]      # gap up 10 on last bar
+    df.loc[19, ["High", "Low", "Close"]] = [111.0, 109.0, 110.0]  # gap up 10 on last bar
     m = CS.compute_metrics(stock(df))
     # last-14 TRs: 13 bars of 2 and one of max(2, |111-100|, |109-100|) = 11
     assert m["atr14_pct"] == round((13 * 2 + 11) / 14 / 110 * 100, 2)
@@ -216,7 +230,7 @@ def test_evaluate_dict_rules_pass_and_fail():
 
 def test_evaluate_missing_metric_fails_even_before_bad_operator():
     assert CS.evaluate(S, {"nope": (">", 1)})[0] is False
-    assert CS.evaluate(S, {"nope": ("~~", 1)})[0] is False       # missing wins over bad op
+    assert CS.evaluate(S, {"nope": ("~~", 1)})[0] is False  # missing wins over bad op
 
 
 def test_evaluate_unknown_operator_raises_with_choices():
@@ -237,8 +251,8 @@ def test_evaluate_callable():
     assert CS.evaluate(S, lambda m: m["roe"] > 10)[0] is True
     ok, m = CS.evaluate(S, lambda m: m["roe"] > 99)
     assert ok is False and "roe" in m
-    assert CS.evaluate(S, lambda m: m["missing"])[0] is False     # exception -> False
-    assert CS.evaluate(S, lambda m: "truthy")[0] is True          # coerced to bool
+    assert CS.evaluate(S, lambda m: m["missing"])[0] is False  # exception -> False
+    assert CS.evaluate(S, lambda m: "truthy")[0] is True  # coerced to bool
 
 
 def test_evaluate_empty_criteria_passes():
@@ -247,8 +261,12 @@ def test_evaluate_empty_criteria_passes():
 
 # ── screen ────────────────────────────────────────────────────────────────────
 def universe():
-    return [stock(None, "A", "IN", roe=10, pe=30), stock(None, "B", "US", roe=30, pe=10),
-            stock(None, "C", "IN", roe=20, pe=20), stock(None, "D", "IN", roe=5, pe=5)]
+    return [
+        stock(None, "A", "IN", roe=10, pe=30),
+        stock(None, "B", "US", roe=30, pe=10),
+        stock(None, "C", "IN", roe=20, pe=20),
+        stock(None, "D", "IN", roe=5, pe=5),
+    ]
 
 
 def test_screen_filters_and_keeps_input_order_by_default():
@@ -261,16 +279,24 @@ def test_screen_filters_and_keeps_input_order_by_default():
 def test_screen_rank_top_ascending():
     u = universe()
     assert list(CS.screen(u, {"roe": (">", 0)}, rank_by="roe")["Symbol"]) == ["B", "C", "A", "D"]
-    assert list(CS.screen(u, {"roe": (">", 0)}, rank_by="roe", ascending=True)["Symbol"]) == \
-        ["D", "A", "C", "B"]
+    assert list(CS.screen(u, {"roe": (">", 0)}, rank_by="roe", ascending=True)["Symbol"]) == [
+        "D",
+        "A",
+        "C",
+        "B",
+    ]
     top = CS.screen(u, {"roe": (">", 0)}, rank_by="roe", top=2)
     assert list(top["Symbol"]) == ["B", "C"] and list(top.index) == [0, 1]
     assert list(CS.screen(u, {"roe": (">", 0)}, top=1)["Symbol"]) == ["A"]
 
 
 def test_screen_unknown_rank_column_keeps_order():
-    assert list(CS.screen(universe(), {"roe": (">", 0)}, rank_by="zzz")["Symbol"]) == \
-        ["A", "B", "C", "D"]
+    assert list(CS.screen(universe(), {"roe": (">", 0)}, rank_by="zzz")["Symbol"]) == [
+        "A",
+        "B",
+        "C",
+        "D",
+    ]
 
 
 def test_screen_show_selects_existing_columns_only():

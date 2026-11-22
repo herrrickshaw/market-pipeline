@@ -1,4 +1,5 @@
 """adaptive_liquidity.py -- floors, capital gate, percentile tiers."""
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -8,7 +9,7 @@ import adaptive_liquidity as AL
 
 def test_market_floor_only_india_and_normalises_input():
     assert AL.market_floor("IN") == 120_000
-    assert AL.market_floor(" india ") == 120_000          # first two chars, stripped, upper
+    assert AL.market_floor(" india ") == 120_000  # first two chars, stripped, upper
     assert AL.market_floor("in") == 120_000
     assert AL.market_floor("US") == 0.0
     assert AL.market_floor("") == 0.0
@@ -29,14 +30,14 @@ def test_gate_position_and_min_adv():
     g = AL.Gate("US", capital_usd=100_000, positions=10)
     assert g.position_usd == 10_000
     assert g.min_adv_usd == pytest.approx(10_000 / 0.15)
-    assert AL.Gate("US", 100.0, 0).position_usd == 100.0           # positions clamped to >=1
+    assert AL.Gate("US", 100.0, 0).position_usd == 100.0  # positions clamped to >=1
     assert AL.Gate("US", 100.0, -3).position_usd == 100.0
 
 
 def test_min_adv_takes_market_floor_when_larger():
-    small = AL.Gate("IN", capital_usd=10_000, positions=10)        # 1k/0.15 = 6.7k < 120k
+    small = AL.Gate("IN", capital_usd=10_000, positions=10)  # 1k/0.15 = 6.7k < 120k
     assert small.min_adv_usd == 120_000
-    big = AL.Gate("IN", capital_usd=10_000_000, positions=10)      # 1M/0.15 > 120k
+    big = AL.Gate("IN", capital_usd=10_000_000, positions=10)  # 1M/0.15 > 120k
     assert big.min_adv_usd == pytest.approx(1_000_000 / 0.15)
 
 
@@ -45,13 +46,13 @@ def adv_frame(values):
 
 
 def test_classify_tradeable_and_adv_pct():
-    g = AL.Gate("US", capital_usd=10_000, positions=10)            # position 1000, min_adv 6666.7
+    g = AL.Gate("US", capital_usd=10_000, positions=10)  # position 1000, min_adv 6666.7
     df = adv_frame([0, -5, 6_000, 6_667, 10_000, 1e9])
     out = AL.classify(df, g)
     assert list(out["tradeable"]) == [False, False, False, True, True, True]
     assert out["adv_pct"].iloc[0] == float("inf") and out["adv_pct"].iloc[1] == float("inf")
     assert out["adv_pct"].iloc[4] == pytest.approx(10.0)
-    assert "tradeable" not in df.columns                          # input not mutated
+    assert "tradeable" not in df.columns  # input not mutated
 
 
 def test_classify_execution_ceiling_is_inclusive_at_15_pct():
@@ -84,13 +85,22 @@ def test_classify_tiers_need_ten_tradeable_names():
 
 
 def test_classify_percentile_tier_assignment_and_untradeable_excluded():
-    g = AL.Gate("US", 1000, 10)                                    # min_adv 666.7
-    vals = [1e6 * (i + 1) for i in range(10)] + [10.0, 0.0]        # 2 untradeable shells
+    g = AL.Gate("US", 1000, 10)  # min_adv 666.7
+    vals = [1e6 * (i + 1) for i in range(10)] + [10.0, 0.0]  # 2 untradeable shells
     out = AL.classify(adv_frame(vals), g)
     # ranks are over the tradeable subset only (the shells do not shift boundaries)
     assert list(out["tier"].iloc[:10]) == [
-        "T5_MOST_ILLIQUID", "T4_ILLIQUID", "T4_ILLIQUID", "T3_MID", "T3_MID",
-        "T2_LIQUID", "T2_LIQUID", "T1_MOST_LIQUID", "T1_MOST_LIQUID", "T1_MOST_LIQUID"]
+        "T5_MOST_ILLIQUID",
+        "T4_ILLIQUID",
+        "T4_ILLIQUID",
+        "T3_MID",
+        "T3_MID",
+        "T2_LIQUID",
+        "T2_LIQUID",
+        "T1_MOST_LIQUID",
+        "T1_MOST_LIQUID",
+        "T1_MOST_LIQUID",
+    ]
     assert out["tier"].iloc[10:].isna().all()
 
 
@@ -114,8 +124,9 @@ def test_capacity_quantile_points():
 
 
 def scan_frame(n, tier="T4_SMALL"):
-    return pd.DataFrame({"Median_Turnover": [float(i + 1) for i in range(n)],
-                         "Liquidity_Tier": [tier] * n})
+    return pd.DataFrame(
+        {"Median_Turnover": [float(i + 1) for i in range(n)], "Liquidity_Tier": [tier] * n}
+    )
 
 
 def test_retier_does_not_mutate_input():
@@ -130,8 +141,13 @@ def test_retier_exact_cut_values():
     t = list(out["Liquidity_Tier"])
     # percentile of row i is 5*(i+1): >=80 T1 (rows 15+), >=60 T2 (11-14), >=40 T3 (7-10),
     # >=20 T4 (3-6), else T5 (0-2)
-    assert t == (["T5_MOST_ILLIQUID"] * 3 + ["T4_ILLIQUID"] * 4 + ["T3_MID"] * 4
-                 + ["T2_LIQUID"] * 4 + ["T1_MOST_LIQUID"] * 5)
+    assert t == (
+        ["T5_MOST_ILLIQUID"] * 3
+        + ["T4_ILLIQUID"] * 4
+        + ["T3_MID"] * 4
+        + ["T2_LIQUID"] * 4
+        + ["T1_MOST_LIQUID"] * 5
+    )
 
 
 def test_retier_requires_20_rankable_rows():
@@ -153,8 +169,7 @@ def test_retier_keeps_unknown_and_skips_nan_and_nonpositive():
     assert out.loc[0, "Liquidity_Tier"] == "UNKNOWN"
     assert out.loc[1, "Liquidity_Tier"] == "T4_SMALL"
     assert out.loc[2, "Liquidity_Tier"] == "T4_SMALL"
-    assert out["Liquidity_Tier"].iloc[3:].isin(
-        [n for _, n in AL.TIER_CUTS]).all()
+    assert out["Liquidity_Tier"].iloc[3:].isin([n for _, n in AL.TIER_CUTS]).all()
 
 
 def test_retier_missing_columns_returns_input():
