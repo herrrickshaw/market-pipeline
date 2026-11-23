@@ -372,3 +372,256 @@ def test_parameters():
         0.95,
     )
     assert EYC.MIN_POINTS == 3
+
+
+# ═══ report builders: fetch / test / run_2020 / sensitivity / main ═══════════════
+import sys  # noqa: E402
+import types  # noqa: E402
+
+ALL_MATURITIES = [
+    "1 Mo",
+    "2 Mo",
+    "3 Mo",
+    "4 Mo",
+    "6 Mo",
+    "1 Yr",
+    "2 Yr",
+    "3 Yr",
+    "5 Yr",
+    "7 Yr",
+    "10 Yr",
+    "20 Yr",
+    "30 Yr",
+]
+TENOR_YEARS = {
+    "1 Mo": 1 / 12,
+    "2 Mo": 2 / 12,
+    "3 Mo": 0.25,
+    "4 Mo": 4 / 12,
+    "6 Mo": 0.5,
+    "1 Yr": 1,
+    "2 Yr": 2,
+    "3 Yr": 3,
+    "5 Yr": 5,
+    "7 Yr": 7,
+    "10 Yr": 10,
+    "20 Yr": 20,
+    "30 Yr": 30,
+}
+
+
+def synthetic_yields(freq="W-FRI"):
+    idx = pd.date_range("1990-01-05", "2016-12-30", freq=freq)
+    n = len(idx)
+    phase = np.linspace(0, 40, n)
+    level = 5.0 + 1.5 * np.sin(phase / 3)
+    slope = 1.0 * np.sin(phase)
+    d = pd.DataFrame({"Date": idx})
+    for m in ALL_MATURITIES:
+        t = TENOR_YEARS[m]
+        d[m] = level - slope * np.exp(-t / 3) + 0.2 * np.log1p(t)
+    d.loc[d["Date"].between("2002-03-01", "2006-02-01"), "30 Yr"] = np.nan  # the 30Y gap
+    return d
+
+
+def synthetic_spx(dates):
+    n = len(dates)
+    path = 100 * np.exp(np.cumsum(np.full(n, 0.002)))
+    for lo, hi in ((300, 380), (800, 900), (1200, 1260)):  # three crashes
+        path[lo:hi] *= np.linspace(1.0, 0.6, hi - lo)
+        path[hi:] *= 0.6
+    return pd.DataFrame({"Date": dates, "spx": path})
+
+
+@pytest.fixture
+def lab(tmp_path, monkeypatch):
+    monkeypatch.setattr(EYC, "CACHE", tmp_path)
+    monkeypatch.setattr(EYC, "YIELDS", tmp_path / "y.parquet")
+    monkeypatch.setattr(EYC, "SPX", tmp_path / "spx.parquet")
+    monkeypatch.setattr(EYC, "RC", tmp_path / "rc.parquet")
+    monkeypatch.setattr(EYC, "RC2020", tmp_path / "rc2020.parquet")
+    monkeypatch.setattr(EYC, "REPORTS", tmp_path / "reports")
+    monkeypatch.setattr(EYC, "REPORT", tmp_path / "reports" / "entropic_rc_test.md")
+    monkeypatch.setattr(EYC, "WARMUP", 150)
+    y = synthetic_yields()
+    y.to_parquet(tmp_path / "y.parquet", index=False)
+    synthetic_spx(y["Date"]).to_parquet(tmp_path / "spx.parquet", index=False)
+    return tmp_path
+
+
+def test_test_requires_fitted_inputs(lab, capsys):
+    assert EYC.test() == 1
+    assert "run --fetch and --fit first" in capsys.readouterr().out
+
+
+def test_test_report_scorecard_and_zone_table(lab, capsys):
+    assert EYC.fit() == 0
+    assert EYC.test() == 0
+    md = EYC.REPORT.read_text()
+    spx = pd.read_parquet(EYC.SPX).set_index("Date")["spx"]
+    onsets = EYC._bear_onsets(spx)
+    assert f"## Bear onsets found ({len(onsets)})" in md and len(onsets) >= 2
+    for o in onsets:
+        assert f"- {o.date()}" in md
+    for name in (
+        "Var(R/C), 60d",
+        "Var(a), 60d",
+        "|a| level",
+        "fit RMSE",
+        "10Y-3M inversion (baseline)",
+    ):
+        assert f"| {name}" in md or f"| **{name}" in md
+    for z in ("I 1990-1998", "II 1999-2002", "III 2003-2006", "IV 2007-2009", "V 2010-2016"):
+        assert f"| {z} |" in md
+    assert "corr(R/C, 10Y-3M spread)" in md and "## Verdict" in md
+    rows = [x for x in md.splitlines() if x.startswith("| Var(R/C), 60d")]
+    cells = [c.strip() for c in rows[0].strip("|").split("|")]
+    assert cells[0] == "Var(R/C), 60d" and f"/{len(onsets)}" in cells[5]
+    assert "-> " in capsys.readouterr().out
+
+
+def test_test_signal_counts_match_the_primitives(lab):
+    EYC.fit()
+    EYC.test()
+    md = EYC.REPORT.read_text()
+    d = pd.read_parquet(EYC.RC).set_index("Date").sort_index()
+    spx = pd.read_parquet(EYC.SPX).set_index("Date")["spx"]
+    idx = d.index.intersection(spx.index)
+    d = d.loc[idx]
+    expect = EYC._score(
+        EYC._signal_dates(d["rc"].rolling(EYC.ROLL).var()), EYC._bear_onsets(spx.loc[idx]), idx
+    )
+    line = [x for x in md.splitlines() if x.startswith("| Var(R/C), 60d")][0]
+    cells = [c.strip() for c in line.strip("|").split("|")]
+    assert (int(cells[1]), int(cells[2]), int(cells[3])) == (
+        expect["signals"],
+        expect["hits"],
+        expect["false_positives"],
+    )
+    assert cells[5] == f"{expect['bears_caught']}/{expect['bears']}"
+
+
+def test_variant2020_runs_both_fits_and_writes_report(lab, capsys):
+    assert EYC.run_2020() == 0
+    out = capsys.readouterr().out
+    assert "joint OLS on {ln(t)/t, 1/t}" in out and "sigma pinned at the 3M point" in out
+    assert "share of days with R/C in [0.5, 1.5]" in out and "corr(R/C 2020, 10Y-3M spread)" in out
+    assert EYC.RC2020.exists()  # only the joint fit is persisted
+    md = (EYC.REPORTS / "entropic_rc_2020.md").read_text()
+    assert md.startswith("# Entropic yield curve — the 2020") and "## Verdict" in md
+    assert "| R/C LOW level (his trigger shape) |" in md and "| sigma HIGH level |" in md
+
+
+def test_variant2020_empty_fit_is_reported(lab, monkeypatch, capsys):
+    y = pd.read_parquet(EYC.YIELDS)
+    y[[c for c in y.columns if c != "Date"]] = np.nan
+    y.to_parquet(EYC.YIELDS, index=False)
+    with pytest.raises(FileNotFoundError):  # no persisted 2020 series to study
+        EYC.run_2020()
+    assert "no rows" in capsys.readouterr().out
+
+
+def test_sensitivity_prints_each_reading_of_t(lab, capsys):
+    assert EYC.sensitivity() == 0
+    out = capsys.readouterr().out
+    for label in EYC.TIME_SCALES:
+        assert f"=== t as {label}" in out
+    assert out.count("I 1990-1998") == 3 and "Parker mean" in out and "-56.78" in out
+
+
+def test_main_dispatch(monkeypatch):
+    calls = []
+    for name in ("fetch", "fit", "test", "sensitivity", "run_2020"):
+        monkeypatch.setattr(EYC, name, lambda n=name: calls.append(n) or 0)
+    monkeypatch.setattr(sys, "argv", ["x"])
+    assert EYC.main() == 1 and calls == []
+    monkeypatch.setattr(sys, "argv", ["x", "--fit", "--test"])
+    assert EYC.main() == 0 and calls == ["fit", "test"]
+    calls.clear()
+    monkeypatch.setattr(sys, "argv", ["x", "--all"])
+    EYC.main()
+    assert calls == ["fetch", "fit", "test", "sensitivity"]
+    calls.clear()
+    monkeypatch.setattr(sys, "argv", ["x", "--variant2020", "--fit"])
+    EYC.main()
+    assert calls == ["run_2020"]  # the 2020 variant short-circuits
+    calls.clear()
+    monkeypatch.setattr(sys, "argv", ["x", "--sensitivity"])
+    monkeypatch.setattr(EYC, "sensitivity", lambda: 3)
+    assert EYC.main() == 3
+
+
+class FakeResp:
+    def __init__(self, text="", fail=False):
+        self.text, self.fail = text, fail
+
+    def raise_for_status(self):
+        if self.fail:
+            raise OSError("500")
+
+
+def treasury_csv(year):
+    return "Date,1 Mo,10 Yr\n" + f"01/03/{year},1.0,2.0\n01/04/{year},1.1,2.1\n"
+
+
+def test_fetch_downloads_years_and_the_index(lab, monkeypatch, capsys):
+    import requests
+
+    monkeypatch.setattr(EYC, "START_YEAR", 2020)
+    monkeypatch.setattr(EYC, "END_YEAR", 2022)
+    seen = []
+
+    def get(url, timeout):
+        seen.append((url, timeout))
+        if "/2021/" in url:
+            return FakeResp(fail=True)
+        if "/2022/" in url:
+            return FakeResp("Other\n")
+        return FakeResp(treasury_csv(2020))
+
+    monkeypatch.setattr(requests, "get", get)
+    cols = pd.MultiIndex.from_product([["Close"], ["^GSPC"]])
+    raw = pd.DataFrame(
+        [[3000.0], [3100.0]],
+        columns=cols,
+        index=pd.DatetimeIndex(["2020-01-02", "2020-01-03"], name="Date"),
+    )
+    monkeypatch.setitem(
+        sys.modules, "yfinance", types.SimpleNamespace(download=lambda *a, **k: raw)
+    )
+    assert EYC.fetch() == 0
+    out = capsys.readouterr().out
+    assert (
+        "2020: 2 rows, 2 maturities" in out
+        and "2021: FAILED (OSError)" in out
+        and "2022: empty" in out
+    )
+    assert all(t == 60 for _, t in seen) and len(seen) == 3
+    y = pd.read_parquet(EYC.YIELDS)
+    assert len(y) == 2 and y["Date"].is_monotonic_increasing
+    s = pd.read_parquet(EYC.SPX)
+    assert list(s.columns) == ["Date", "spx"] and list(s["spx"]) == [3000.0, 3100.0]
+
+
+def test_fetch_with_no_treasury_data_fails_fast(lab, monkeypatch, capsys):
+    import requests
+
+    monkeypatch.setattr(EYC, "START_YEAR", 2020)
+    monkeypatch.setattr(EYC, "END_YEAR", 2020)
+    monkeypatch.setattr(requests, "get", lambda url, timeout: FakeResp(fail=True))
+    assert EYC.fetch() == 1
+    assert "no Treasury data fetched" in capsys.readouterr().out
+
+
+def test_fetch_deduplicates_dates_keeping_the_first(lab, monkeypatch):
+    import requests
+
+    monkeypatch.setattr(EYC, "START_YEAR", 2020)
+    monkeypatch.setattr(EYC, "END_YEAR", 2021)
+    monkeypatch.setattr(requests, "get", lambda url, timeout: FakeResp(treasury_csv(2020)))
+    raw = pd.DataFrame({"Close": [1.0]}, index=pd.DatetimeIndex(["2020-01-02"], name="Date"))
+    monkeypatch.setitem(
+        sys.modules, "yfinance", types.SimpleNamespace(download=lambda *a, **k: raw)
+    )
+    EYC.fetch()
+    assert len(pd.read_parquet(EYC.YIELDS)) == 2  # same two dates from both years
