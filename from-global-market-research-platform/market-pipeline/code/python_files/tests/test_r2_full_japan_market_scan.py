@@ -189,6 +189,18 @@ def test_bulk_download_direct_multiindex_and_failures(jp, monkeypatch, capsys):
     assert "Batch 1/4" in text and "OK (2 usable)" in text and "empty" in text and "ERROR — rate limited" in text
 
 
+def test_bulk_download_min_history_boundary(jp, monkeypatch):
+    oc = types.ModuleType("ohlcv_cache")
+    oc.get = lambda *a, **k: {}
+    monkeypatch.setitem(sys.modules, "ohlcv_cache", oc)
+    cols = pd.MultiIndex.from_product([["Close"], ["A.T", "B.T"]])
+    raw = pd.DataFrame(np.arange(1.0, 17.0).reshape(8, 2), columns=cols)
+    raw.iloc[-1, 1] = np.nan  # B.T has 7 usable rows, A.T has exactly 8 (= DARVAS_CONFIRM + 5)
+    jp.yf.download = lambda batch, **kw: raw
+    out = jp.bulk_download_ohlc(["A.T", "B.T"])
+    assert set(out) == {"A.T"} and len(out["A.T"]) == 8
+
+
 def test_bulk_download_single_ticker_flat_frame_and_cache_exception(jp, monkeypatch, capsys):
     oc = types.ModuleType("ohlcv_cache")
 

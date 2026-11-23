@@ -114,6 +114,10 @@ def test_new_high_signals_first_day_of_run_only():
     idx = [int(np.where(df["Date"] == d)[0][0]) for d in sig["signal_date"]]
     assert all(b - a > 1 for a, b in zip(idx, idx[1:]))
     assert all(i >= 252 for i in idx)
+    high = df["High"].to_numpy()
+    close = df["Close"].to_numpy()
+    for i in idx:  # every signal really is within 2% of the prior 252-bar high (excluding the current bar)
+        assert close[i] >= 0.98 * high[i - 252:i].max()
     assert fst.new_high_signals(_px("S", closes[:259])).empty
     assert fst.new_high_signals(_px("P", closes / 100.0)).empty
 
@@ -433,3 +437,32 @@ def test_main_wires_everything_and_saves(monkeypatch, tmp_path, capsys):
     assert {"year", "ret_T+5d", "xret_T+63d", "log_liquidity"} <= set(out.columns)
     txt = capsys.readouterr().out
     assert "dropped 2 technical-screener signals fired on SPY itself" in txt, txt  # new_highs on flat SPY + the insider row
+
+
+def test_piotroski_f_values_and_pass_boundary():
+    out = fst.compute_fundamental_screens(_fund())
+    a = out[out["ticker"] == "AAA"]
+    # first filing: only cfo>0, cfo>net income and the "no dilution" default (NaN share change counts as no dilution)
+    assert a["piotroski_f"].tolist() == [3, 5, 7, 5, 6, 5]
+    assert a["piotroski_pass"].tolist() == [0, 0, 1, 0, 0, 0]  # 7 is the pass threshold, 6 is not
+
+
+def test_coffee_can_market_cap_floor_is_inclusive():
+    f = _fund()
+    f["long_term_debt"], f["short_term_debt"], f["shares"] = 10.0, 5.0, 100.0
+    scored = fst.compute_fundamental_screens(f)
+    assert (scored[scored["ticker"] == "AAA"]["coffee_can_pass"].iloc[3:] == 1).all()
+    for close, expected in ((1e7, 1), (1e7 - 1, 0)):  # market cap exactly 1e9 passes; just under fails
+        ohlcv = pd.concat([_px("AAA", np.full(2200, close), start="2016-01-01"), _px("BBB", np.full(2200, close), start="2016-01-01")])
+        out = fst.attach_market_cap(scored, ohlcv)
+        late = out[(out["ticker"] == "AAA") & (out["fy_end"].dt.year >= 2019)]
+        assert (late["coffee_can_pass"] == expected).all(), close
+
+
+def test_golden_cross_length_gate_and_warmup_suppression():
+    # a genuine cross right after the 200-bar warm-up is only reported once the series reaches 210 bars
+    step = np.concatenate([np.full(200, 50.0), np.full(10, 500.0)])
+    assert fst.golden_cross_signals(_px("X", step[:205])).empty
+    assert len(fst.golden_cross_signals(_px("X", step))) == 1
+    # a steadily rising series is "above" from the first bar where the 200-DMA exists; that warm-up artefact is not a cross
+    assert fst.golden_cross_signals(_px("UP", np.linspace(10, 100, 300))).empty
