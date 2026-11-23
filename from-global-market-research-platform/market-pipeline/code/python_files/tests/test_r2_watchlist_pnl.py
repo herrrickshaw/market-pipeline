@@ -323,6 +323,14 @@ def test_build_zero_day_and_stale_entries_are_nan_pct(env, monkeypatch):
     assert pd.isna(d.loc["AAA", "pct_since"]) and pd.isna(d.loc["AAA", "vs_mkt"])
 
 
+def test_build_price_dated_on_entry_day_is_zero_percent_not_nan(env, monkeypatch):
+    _watchlist(env, [("AAA", "US", "held", "2026-01-08")])
+    _panel(wp.PANELS["US"], {"AAA": ("2026-01-01", [10.0, 11, 12, 13, 14, 15]), "SPY": ("2026-01-01", [100.0] * 6)})
+    monkeypatch.setattr(wp, "_current_prices", lambda m, a=None: (pd.Series({"AAA": 14.0}), pd.Series({"AAA": pd.Timestamp("2026-01-08")})))
+    d = wp.build(None, None).set_index("symbol")
+    assert d.loc["AAA", "entry_price"] == 14.0 and d.loc["AAA", "pct_since"] == 0.0  # same-day price: zero move, not "unknown"
+
+
 def test_build_sold_names_use_realized_returns(env, monkeypatch):
     _watchlist(env, [("AAA", "US", "sold", "2026-01-06"), ("BBB", "US", "sold", "2026-01-06"), ("CCC", "US", "held", "2026-01-06")])
     _panel(wp.PANELS["US"], {s: ("2026-01-01", [10.0] * 6) for s in ("AAA", "BBB", "CCC", "SPY")})
