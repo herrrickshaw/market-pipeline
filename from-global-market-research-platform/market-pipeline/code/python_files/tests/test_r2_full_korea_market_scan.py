@@ -58,7 +58,7 @@ def test_save_cache_swallows_errors(kr, monkeypatch, tmp_path):
 
 
 def test_fetch_kind_list_parses_rows(kr, monkeypatch):
-    html_df = pd.DataFrame({"회사명": [" Samsung ", "BadCode", "Pad"], "종목코드": [5930, "ABC123", "660"], "업종": ["Semis", "x", None]})
+    html_df = pd.DataFrame({"회사명": [" Samsung ", "BadCode", "Pad"], "종목코드": [5930, "ABC123", "660"], "업종": ["Semis", "x", "Misc"]})
     seen = {}
     resp = types.SimpleNamespace(text="<html/>", raise_for_status=lambda: None)
 
@@ -70,7 +70,7 @@ def test_fetch_kind_list_parses_rows(kr, monkeypatch):
     out = kr._fetch_kind_list("stockMkt", "KOSPI", ".KS")
     assert [s["code"] for s in out] == ["005930", "000660"]
     assert out[0] == {"code": "005930", "name": "Samsung", "sector": "Semis", "market": "KOSPI", "yf_suffix": ".KS"}
-    assert out[1]["sector"] == "None"
+    assert out[1]["sector"] == "Misc"
     assert seen["params"]["marketType"] == "stockMkt" and seen["timeout"] == 20
 
 
