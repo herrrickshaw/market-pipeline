@@ -203,3 +203,245 @@ def test_peer_monthly_query_contents():
 
 def test_defaults():
     assert FS.DEFAULT_COST_BPS == 50.0 and FS.MONTHS_PER_YEAR == 12
+
+
+# ═══ main(): report assembly against a faked duckdb/Postgres ═══════════════════
+import sys  # noqa: E402
+import types  # noqa: E402
+
+
+class FakeDuck:
+    """Dispatches the three kinds of query main() issues."""
+
+    def __init__(self, nav_frame, panel=("2013-01-01", "2026-01-01"), loaded=0):
+        self.nav_frame, self.panel, self.loaded, self.queries = nav_frame, panel, loaded, []
+        self.last = None
+
+    def execute(self, q, params=None):
+        self.queries.append(q)
+        self.last = q
+        return self
+
+    def fetchone(self):
+        if "min(nav_date)" in self.last:
+            return self.panel
+        return (self.loaded,)
+
+    def df(self):
+        return self.nav_frame
+
+
+def install_duckdb(monkeypatch, con):
+    monkeypatch.setitem(sys.modules, "duckdb", types.SimpleNamespace(connect=lambda: con))
+
+
+def write_events(tmp_path, rows=None):
+    rows = rows or [
+        ("IN", "2024-01-10", 30, 10.0, "ANOMALY"),
+        ("IN", "2024-02-10", 30, 6.0, "ageout_validated"),
+        ("US", "2024-01-10", 30, 99.0, "ANOMALY"),
+    ]
+    p = tmp_path / "events.csv"
+    pd.DataFrame(rows, columns=["market", "evict_date", "days", "exit_ret_pct", "outcome"]).to_csv(
+        p, index=False
+    )
+    return p
+
+
+def peer_navs(months, growths):
+    rows = []
+    for code, g in enumerate(growths):
+        for k, m in enumerate(months):
+            rows.append(
+                {
+                    "scheme_code": code,
+                    "nav_date": m.end_time.date().isoformat(),
+                    "nav": 100.0 * (1 + g) ** k,
+                    "category": "Equity Scheme - Large Cap Fund",
+                    "scheme_name": f"F{code}",
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+@pytest.fixture
+def main_env(tmp_path, monkeypatch):
+    monkeypatch.setattr(FS, "OUT_MD", tmp_path / "scorecard.md")
+    return tmp_path
+
+
+def run_main(monkeypatch, *argv):
+    monkeypatch.setattr(sys, "argv", ["fund_scorecard", *argv])
+    return FS.main()
+
+
+def test_main_no_events_for_market(main_env, monkeypatch, capsys):
+    ev = write_events(main_env)
+    assert run_main(monkeypatch, "--events", str(ev), "--market", "JP") == 1
+    assert "no events for market JP" in capsys.readouterr().out
+
+
+def test_main_rank_report(main_env, monkeypatch, capsys):
+    ev = write_events(main_env)
+    months = pd.period_range("2024-01", "2024-08", freq="M")
+    con = FakeDuck(peer_navs(months, [0.5, 0.5, 0.5, 0.0, 0.0, 0.0]))
+    install_duckdb(monkeypatch, con)
+    assert run_main(monkeypatch, "--events", str(ev), "--min-peers", "3") == 0
+    md = FS.OUT_MD.read_text()
+    assert md.startswith("# Fund scorecard — IN tier book vs Indian MF peers")
+    assert "- trades            : 2  (median hold 30d)" in md  # US row excluded
+    assert "- costs charged     : 50 bps round trip" in md
+    line = [x for x in md.splitlines() if x.startswith("| Large Cap Fund")][0]
+    cells = [c.strip() for c in line.strip("|").split("|")]
+    assert cells[1] == "6" and cells[2] == "0" and cells[5] == "4/7" and cells[6] == "**50%**"
+    assert "Bias note" in md and "--ter-bps 0" in md
+    assert "no events" not in md and "PEER PANEL DOES NOT COVER" not in md
+    assert any("pg.funds.nav" in q for q in con.queries)
+    assert f"wrote {FS.OUT_MD}" in capsys.readouterr().out
+
+
+def test_main_ter_flag_removes_bias_note_and_shows_fee(main_env, monkeypatch):
+    ev = write_events(main_env)
+    months = pd.period_range("2024-01", "2024-08", freq="M")
+    install_duckdb(monkeypatch, FakeDuck(peer_navs(months, [0.0, 0.0, 0.0])))
+    assert (
+        run_main(
+            monkeypatch,
+            "--events",
+            str(ev),
+            "--min-peers",
+            "3",
+            "--ter-bps",
+            "100",
+            "--cost-bps",
+            "80",
+        )
+        == 0
+    )
+    md = FS.OUT_MD.read_text()
+    assert "80 bps round trip + 100 bps/yr synthetic fee" in md and "Bias note" not in md
+
+
+def test_main_thin_category_is_skipped_not_ranked(main_env, monkeypatch):
+    ev = write_events(main_env)
+    months = pd.period_range("2024-01", "2024-08", freq="M")
+    install_duckdb(monkeypatch, FakeDuck(peer_navs(months, [0.1, 0.2])))
+    run_main(monkeypatch, "--events", str(ev))  # default --min-peers 5
+    md = FS.OUT_MD.read_text()
+    assert "Skipped as too thin to rank against (<5 full-window peers): Large Cap Fund (2)" in md
+    assert not [x for x in md.splitlines() if x.startswith("| Large Cap Fund")]
+
+
+def test_main_outcome_filter_prints_lookahead_banner(main_env, monkeypatch, capsys):
+    ev = write_events(main_env)
+    months = pd.period_range("2024-01", "2024-08", freq="M")
+    install_duckdb(monkeypatch, FakeDuck(peer_navs(months, [0.0] * 3)))
+    run_main(monkeypatch, "--events", str(ev), "--outcome", "ANOMALY", "--min-peers", "3")
+    out = capsys.readouterr().out
+    assert "LOOK-AHEAD" in out and "- trades            : 1" in FS.OUT_MD.read_text()
+
+
+def test_main_date_window_filters_events(main_env, monkeypatch):
+    ev = write_events(main_env)
+    months = pd.period_range("2024-01", "2024-08", freq="M")
+    install_duckdb(monkeypatch, FakeDuck(peer_navs(months, [0.0] * 3)))
+    run_main(
+        monkeypatch,
+        "--events",
+        str(ev),
+        "--from",
+        "2024-02-01",
+        "--to",
+        "2024-02-28",
+        "--min-peers",
+        "3",
+    )
+    assert "- trades            : 1" in FS.OUT_MD.read_text()
+    run_main(
+        monkeypatch,
+        "--events",
+        str(ev),
+        "--from",
+        "2024-01-10",
+        "--to",
+        "2024-01-10",
+        "--min-peers",
+        "3",
+    )
+    assert "- trades            : 1" in FS.OUT_MD.read_text()  # both bounds inclusive
+
+
+def test_main_withholds_the_ranking_when_the_peer_panel_has_gaps(main_env, monkeypatch):
+    ev = write_events(main_env)
+    months = pd.period_range("2024-01", "2024-08", freq="M")
+    nav = peer_navs(months, [0.0] * 3)
+    nav = nav[~nav.nav_date.str.startswith("2024-02")]  # a hole in the middle
+    con = FakeDuck(nav, loaded=7)
+    install_duckdb(monkeypatch, con)
+    assert run_main(monkeypatch, "--events", str(ev), "--min-peers", "3") == 0
+    md = FS.OUT_MD.read_text()
+    assert "## ⚠ PEER PANEL DOES NOT COVER THE WINDOW — ranking withheld" in md
+    assert "First gaps: 2024-02" in md
+    assert "no fund matching this filter existed" in md  # the panel itself has the months
+    assert "Rank within category" not in md
+    con.loaded = 0
+    run_main(monkeypatch, "--events", str(ev), "--min-peers", "3")
+    assert "amfi_nav_collect.py --backfill-years 10" in FS.OUT_MD.read_text()
+
+
+def test_main_empty_peer_panel_withholds_too(main_env, monkeypatch):
+    ev = write_events(main_env)
+    install_duckdb(monkeypatch, FakeDuck(pd.DataFrame()))
+    assert run_main(monkeypatch, "--events", str(ev)) == 0
+    assert "PEER PANEL DOES NOT COVER" in FS.OUT_MD.read_text()
+
+
+def test_main_unrankable_funds_are_counted_not_ranked(main_env, monkeypatch):
+    ev = write_events(main_env)
+    months = pd.period_range("2024-01", "2024-08", freq="M")
+    nav = peer_navs(months, [0.0, 0.0, 0.0, 0.0])
+    late = nav[(nav.scheme_code == 3) & (nav.nav_date < "2024-03")].index  # launched in March
+    nav = nav.drop(late)
+    install_duckdb(monkeypatch, FakeDuck(nav))
+    run_main(monkeypatch, "--events", str(ev), "--min-peers", "3")
+    line = [x for x in FS.OUT_MD.read_text().splitlines() if x.startswith("| Large Cap Fund")][0]
+    cells = [c.strip() for c in line.strip("|").split("|")]
+    assert cells[1] == "3" and cells[2] == "1"
+
+
+# ── mutation follow-ups ───────────────────────────────────────────────────────
+def test_main_window_runs_from_first_to_last_book_month(main_env, monkeypatch):
+    ev = write_events(main_env)
+    months = pd.period_range("2024-01", "2024-08", freq="M")
+    install_duckdb(monkeypatch, FakeDuck(peer_navs(months, [0.0, 0.0, 0.0])))
+    run_main(monkeypatch, "--events", str(ev), "--min-peers", "3")
+    md = FS.OUT_MD.read_text()
+    line = [x for x in md.splitlines() if x.startswith("- window")][0]
+    # first trade 2024-01-10, last 2024-02-10 + 30d: the book spans Jan..Mar
+    assert "**2024-01-01 → 2024-03-31**" in line
+
+
+def test_main_rank_if_fully_invested_does_not_count_ties_as_losses(main_env, monkeypatch):
+    ev = write_events(main_env)
+    months = pd.period_range("2024-01", "2024-08", freq="M")
+    install_duckdb(monkeypatch, FakeDuck(peer_navs(months, [0.0, 0.0, 0.0])))
+    captured = {}
+    real_daily, real_perf = FS.book_daily, FS.perf
+
+    def book_daily(events, cost_bps):
+        captured["daily"] = real_daily(events, cost_bps)
+        return captured["daily"]
+
+    def tied_perf(series):
+        if series.name == "nav":  # the book itself
+            return real_perf(series)
+        d = captured["daily"]
+        inv = d[d.n_positions > 0].ret
+        return {"cagr": ((1 + inv).prod() ** (365.25 / len(inv)) - 1)}
+
+    monkeypatch.setattr(FS, "book_daily", book_daily)
+    monkeypatch.setattr(FS, "perf", tied_perf)
+    run_main(monkeypatch, "--events", str(ev), "--min-peers", "3")
+    line = [x for x in FS.OUT_MD.read_text().splitlines() if x.startswith("| Large Cap Fund")][0]
+    cells = [c.strip() for c in line.strip("|").split("|")]
+    assert cells[1] == "3" and cells[7] == "1/4"  # equal to the invested-only CAGR is not a loss
