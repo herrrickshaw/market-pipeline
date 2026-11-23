@@ -176,6 +176,7 @@ def test_fetch_krx_ohlc_cache_exception_then_progress_line(kr, monkeypatch, caps
     assert out == {}
     text = capsys.readouterr().out
     assert "ohlcv_cache unavailable: cache offline" in text and "200/200 fetched (0 usable)" in text
+    assert "100/200 fetched" not in text  # progress is only reported every 200 tickers
 
 
 # ------------------------------------------------------------------ helpers + fundamentals

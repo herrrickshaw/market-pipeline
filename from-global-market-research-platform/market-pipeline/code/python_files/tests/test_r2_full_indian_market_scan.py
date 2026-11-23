@@ -296,6 +296,14 @@ def test_fundamental_scan_mcap_threshold_in_crore(ind, monkeypatch):
     assert ind.fundamental_scan("X")["qualifies_mf"] is False  # exactly 15 cr is not > 15 cr (and EY tiny)
 
 
+def test_fundamental_scan_debt_to_equity_percentage_boundary(ind, monkeypatch):
+    # yfinance reports D/E in percent; values above 10 are rescaled, 10 itself is taken as a ratio (fails the <1 bar)
+    monkeypatch.setattr(ind.yf, "Ticker", lambda s: _Tk(info={"debtToEquity": 10.0}, mcap=5e9))
+    assert ind.fundamental_scan("X")["cc_score"] == "5/6"
+    monkeypatch.setattr(ind.yf, "Ticker", lambda s: _Tk(info={"debtToEquity": 10.5}, mcap=5e9))
+    assert ind.fundamental_scan("X")["cc_score"] == "6/6"
+
+
 def test_fundamental_scan_bull_cartel_boundaries(ind, monkeypatch):
     def q(rev0, ni0):
         return _fin({"Total Revenue": [rev0, 0, 0, 0, 100], "Net Income": [ni0, 0, 0, 0, 2e7]}, ncols=5)
@@ -394,7 +402,7 @@ def test_main_full_pipeline(ind, monkeypatch, capsys):
         calls.append((sym, suffix, price))
         if sym == "BBB":
             raise RuntimeError("scan failed")
-        return {"f_score": 8, "f_strong": True, "qualifies_cc": sym == "AAA", "cc_score": "6/6", "qualifies_mf": sym == "AAA", "qualifies_bc": False,
+        return {"f_score": 8, "f_strong": True, "qualifies_cc": sym in ("AAA", "500001"), "cc_score": "6/6", "qualifies_mf": sym == "AAA", "qualifies_bc": False,
                 "Revenue_CAGR_%": 12.0}
     monkeypatch.setattr(ind, "fundamental_scan", fund)
     nse = types.SimpleNamespace(print_live_context=lambda: print("LIVE-CONTEXT"))
@@ -407,8 +415,9 @@ def test_main_full_pipeline(ind, monkeypatch, capsys):
     assert res["total_scanned"] == 3 and res["breakout_count"] == 1 and res["gc_count"] == 1
     assert "BBB: error — scan failed" in out
     assert len(res["triple_hits"]) == 1 and res["triple_hits"][0]["Symbol"] == "AAA"
-    # AAA passes 5 screens (breakout, 200DMA, Piotroski, coffee can, magic formula); 500001 only 2; BBB's scan failed
-    assert [r["Symbol"] for r in res["six_screen_hits"]] == ["AAA"] and res["six_screen_hits"][0]["Screens_Passed"] == 5
+    # AAA passes 5 screens (breakout, 200DMA, Piotroski, coffee can, magic formula); 500001 exactly 3 (the inclusive threshold); BBB's scan failed
+    hits = {r["Symbol"]: r["Screens_Passed"] for r in res["six_screen_hits"]}
+    assert hits == {"AAA": 5, "500001": 3}
     sheets = pd.read_excel(res["excel_path"], sheet_name=None, dtype={"Symbol": str})
     assert list(sheets["Triple_Hits"]["Symbol"]) == ["AAA"]
 

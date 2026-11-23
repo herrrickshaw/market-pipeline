@@ -380,8 +380,8 @@ def test_fundamental_scan_magic_formula_and_boundaries(us, monkeypatch):
 def test_fundamental_scan_bull_cartel_thresholds(us, monkeypatch):
     def q(rev0, ni0):
         return _fin({"Total Revenue": [rev0, 0, 0, 0, 100], "Net Income": [ni0, 0, 0, 0, 2e6]}, ncols=5)
-    monkeypatch.setattr(us.yf, "Ticker", lambda s: _Tk(inc_q=q(115.0, 2.4e6)))
-    assert us.fundamental_scan("X")["qualifies_bc"] is False  # sales growth exactly 15% is not > 15
+    monkeypatch.setattr(us.yf, "Ticker", lambda s: _Tk(inc_q=q(115.0, 2.5e6)))
+    assert us.fundamental_scan("X")["qualifies_bc"] is False  # sales growth exactly 15% is not > 15 (profit growth is 25%)
     monkeypatch.setattr(us.yf, "Ticker", lambda s: _Tk(inc_q=q(116.0, 2.4e6)))
     assert us.fundamental_scan("X")["qualifies_bc"] is False  # profit growth exactly 20% is not > 20
     monkeypatch.setattr(us.yf, "Ticker", lambda s: _Tk(inc_q=q(116.0, 2.5e6)))

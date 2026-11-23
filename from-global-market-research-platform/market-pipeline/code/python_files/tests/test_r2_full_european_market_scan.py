@@ -335,3 +335,13 @@ def test_main_flat_frame_download_and_technical_error(eu, monkeypatch, tmp_path,
     eu.main()
     out = capsys.readouterr().out
     assert "Technical error on AAA.DE: darvas broke" in out and "Processed 0 stocks" in out
+
+
+@pytest.mark.parametrize("score,expected_hits", [(7, ["AAA.DE"]), (6, [])])
+def test_main_triple_hit_requires_f_score_of_at_least_7(eu, monkeypatch, tmp_path, score, expected_hits):
+    _setup(eu, monkeypatch, {"AAA.DE": "BREAKOUT_BUY"}, argv=("prog", "--workers", "1"))
+    monkeypatch.setattr(eu, "fundamental_scan", lambda s: {"f_score": score, "cc_qualifies": "PASS", "cc_score": "6/6"})
+    eu.main()
+    f = next((tmp_path / "european_scan").glob("european_market_scan_*.xlsx"))
+    hits = pd.read_excel(f, sheet_name="Triple_Hits")
+    assert list(hits["Symbol"]) == expected_hits if expected_hits else hits.empty

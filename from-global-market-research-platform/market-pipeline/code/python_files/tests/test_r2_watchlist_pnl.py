@@ -209,6 +209,17 @@ def test_fetch_missing_asof_cap_and_failures(monkeypatch, capsys):
     assert "yfinance unavailable" in capsys.readouterr().out
 
 
+def test_fetch_missing_last_bar_on_entry_date_is_zero_percent(monkeypatch):
+    idx = pd.date_range("2026-01-01", periods=3, freq="B")  # last bar is 2026-01-05
+    fake = types.ModuleType("yfinance")
+    fake.Ticker = lambda t: _Hist(pd.DataFrame({"Close": [1.0, 2.0, 4.0]}, index=idx))
+    monkeypatch.setitem(sys.modules, "yfinance", fake)
+    d = _need_frame()
+    d["date_added"] = [pd.Timestamp("2026-01-05"), pd.Timestamp("2026-01-05")]
+    out = wp._fetch_missing(d, None)
+    assert out.at[0, "entry_price"] == 4.0 and out.at[0, "pct_since"] == 0.0 and out.at[0, "held_days"] == 0
+
+
 def test_fetch_missing_cap_before_all_bars_and_no_date_added(monkeypatch):
     idx = pd.date_range("2026-01-05", periods=3, freq="B")
     fake = types.ModuleType("yfinance")

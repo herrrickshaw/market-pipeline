@@ -281,6 +281,15 @@ def test_fundamental_scan_coffee_can_failures_and_fcf_fallback(jp, monkeypatch):
     assert jp.fundamental_scan("X.T")["cc_score"] == "5/6"
 
 
+def test_fundamental_scan_low_roce_fails_c2(jp, monkeypatch):
+    inc = STRONG_INC.copy()
+    inc.loc["EBIT"] = [100, 60, 50]  # ROCE 12.5% / 7.5% / 7.1% -> average under the 15% bar
+    monkeypatch.setattr(jp.yf, "Ticker", lambda t: _ticker(inc, STRONG_BAL, STRONG_CF))
+    r = jp.fundamental_scan("L.T")
+    assert r["f_strong"] and r["cc_score"] == "5/6" and r["cc_qualifies"] == "FAIL"
+    assert 7 < r["cc_roce_avg"] < 15
+
+
 def test_fundamental_scan_weak_company_skips_coffee_can(jp, monkeypatch):
     weak_inc = _fin({"Net Income": [-5, 10, 12], "Total Revenue": [100, 120, 130], "Gross Profit": [10, 30, 35]})
     weak_bal = _fin({"Total Assets": [1000, 900, 900], "Long Term Debt": [300, 100, 100],
