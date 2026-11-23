@@ -284,3 +284,27 @@ def test_run_historical_full_report(hist_env, monkeypatch, capsys):
     files = list((hist_env / "out").glob("sentiment_link_IN_*.xlsx"))
     assert len(files) == 1
     assert pd.ExcelFile(files[0]).sheet_names == ["DISCLAIMER", "Linkage_Summary", "All_Events"]
+
+
+def test_detect_minimum_history_is_trail_plus_seventy():
+    n = sl.TRAIL_WIN + 69
+    df = _with_shock(62, 0.1, n=n)
+    assert (
+        sl.detect_shocks_and_returns("A", df) == []
+    )  # 129 bars: below the guard even though a shock exists
+    df = _with_shock(62, 0.1, n=n + 1)
+    assert any(e["z"] > 5 for e in sl.detect_shocks_and_returns("A", df))
+
+
+def test_analyse_linkage_hit_rate_counts_only_strictly_positive_returns():
+    rows = [{"direction": "POS", **{f"fwd_{k}": 0.0 for k in sl.HORIZONS}} for _ in range(10)]
+    rows += [{"direction": "POS", **{f"fwd_{k}": 1.0 for k in sl.HORIZONS}} for _ in range(10)]
+    link = sl.analyse_linkage(pd.DataFrame(rows))
+    assert (link["Hit_rate%"] == 50.0).all()
+
+
+def test_run_historical_counts_files_with_exactly_two_hundred_bars(hist_env, capsys):
+    _quiet(200).to_parquet(hist_env / "cache" / "EDGE.NS.parquet")
+    _quiet(199).to_parquet(hist_env / "cache" / "LOW.NS.parquet")
+    sl.run_historical("IN", 0)
+    assert "1 stocks with ≥200 bars" in capsys.readouterr().out

@@ -925,3 +925,69 @@ def test_render_handles_empty_and_all_missing_rows():
     ]
     html = wd.render(miss, "2026-07-30")
     assert "X" in html
+
+
+def test_turnover_needs_ten_observations(monkeypatch):
+    monkeypatch.setitem(
+        sys.modules,
+        "liquidity",
+        types.SimpleNamespace(currency_for=lambda s: "USD", CCY={"US": "USD"}, SUBUNIT={}),
+    )
+    ten = pd.DataFrame({"Close": [2.0] * 10, "Volume": [5.0] * 10})
+    assert wd._turnover_usd(ten, "A", "US", {"USD": 1.0}) == 10.0
+    assert wd._turnover_usd(ten.head(9), "A", "US", {"USD": 1.0}) is None
+
+
+def test_zone_series_flat_prices_are_hold_not_sell():
+    z = wd.zone_series(
+        pd.DataFrame({"Close": np.full(60, 100.0)}, index=pd.bdate_range("2025-01-01", periods=60))
+    )
+    assert set(z) == {"HOLD"}  # close == EMA50 exactly: not below it
+
+
+def _streak_n(target):
+    for n in range(4, 60):
+        c = np.r_[np.linspace(100, 200, 100), np.linspace(200, 100, n)]
+        s = wd.sell_streak(
+            wd.zone_series(
+                pd.DataFrame({"Close": c}, index=pd.bdate_range("2025-01-01", periods=len(c)))
+            )
+        )
+        if s == target:
+            return n
+    raise AssertionError(target)
+
+
+@pytest.mark.parametrize(
+    "streak,evicted,purged",
+    [(5, False, False), (6, True, False), (15, True, False), (16, False, True)],
+)
+def test_maintain_streak_boundaries(mt, streak, evicted, purged):
+    assert (wd.SELL_STREAK_LIMIT, wd.PURGE_SELL_SESSIONS) == (5, 15)
+    n = _streak_n(streak)
+    mt["X"] = _sell_frame(n)
+    wl = pd.DataFrame(
+        {
+            "symbol": ["X"],
+            "market": ["US"],
+            "status": ["signal"],
+            "note": [""],
+            "entry_date": ["2025-01-02"],
+            "entry_price": [1.0],
+        }
+    )
+    out, ev, pu, _ = wd.maintain(wl)
+    assert bool(ev) is evicted and bool(pu) is purged
+
+
+def test_protected_statuses_include_value_hold():
+    assert {"held", "value-hold", "sold"} == wd.PROTECTED_STATUSES
+    wl = pd.DataFrame({"status": ["value-hold", "signal"]})
+    assert wd.guard_droppable(wl, [0, 1]) == ([1], [0])
+
+
+def test_why_listed_recurring_prefix_must_be_the_full_word():
+    assert (
+        wd.why_listed("signal", "recurrent thing")
+        == "screener signal (source not recorded) — recurrent thing"
+    )

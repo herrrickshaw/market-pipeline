@@ -327,3 +327,52 @@ def test_main_writes_report_and_scores_and_honours_purge_flag(audit, monkeypatch
     monkeypatch.setattr(sys, "argv", ["mailer_prediction_audit.py", "--purge-weak"])
     audit.main()
     assert purged == [df]
+
+
+def test_trend_series_keeps_moves_up_to_sixty_percent(audit, monkeypatch):
+    monkeypatch.setitem(audit.BASKETS, "us", [f"T{i}" for i in range(6)])
+    close = _close(300, 0.002)
+    close.iloc[-1] = (
+        close.iloc[-2] * 0.45
+    )  # a -55% last print is real (<= 60%) and breaks the trend
+    assert audit.trend_series("US", close).iloc[-1] == "bear"
+
+
+def test_part_b_history_threshold_and_return_filter(audit, monkeypatch, tmp_path):
+    seen = []
+    orig = audit._fakes.K.filter
+
+    def spy(self, logp):
+        seen.append(len(logp))
+        return orig(self, logp)
+
+    monkeypatch.setattr(audit._fakes.K, "filter", spy)
+    _setup_b(
+        audit,
+        monkeypatch,
+        tmp_path,
+        rows=[("EXACT", "US", "watch", ""), ("JUMP", "US", "watch", "")],
+    )
+    idx = pd.bdate_range("2023-01-02", periods=300)
+    rng = np.random.default_rng(3)
+    exact = pd.Series(100 * np.cumprod(1 + rng.normal(0.0005, 0.01, 300)), index=idx)
+    jump = exact.copy()
+    jump.iloc[150:] *= 2.0  # a +69% log return: filtered out of the Kalman input
+    long = (
+        pd.concat({"EXACT": exact, "JUMP": jump}, axis=1)
+        .reset_index()
+        .melt(id_vars="index", var_name="Symbol", value_name="Close")
+        .rename(columns={"index": "Date"})
+    )
+    monkeypatch.setattr(audit, "_panel", lambda mkt: long)
+    _, df = audit.part_b()
+    assert sorted(df.symbol) == ["EXACT", "JUMP"]  # exactly 300 observations is enough
+    assert sorted(seen) == [
+        298,
+        299,
+    ]  # EXACT: 299 returns; JUMP: one return dropped by the |r| < 0.5 filter
+
+
+def test_part_b_zero_drift_bull_state_is_hold_not_enter(audit, monkeypatch, tmp_path):
+    _setup_b(audit, monkeypatch, tmp_path, "bull", "LOW", 2, 0.0)
+    assert audit.part_b()[1].query("symbol == 'AAA'").verdict.iloc[0] == "HOLD-OK"

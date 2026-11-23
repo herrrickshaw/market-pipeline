@@ -522,3 +522,74 @@ def test_get_cache_singleton_and_warm_cache(monkeypatch, cache, capsys):
     calls.clear()
     mc.warm_cache(["A"], index_tickers=["^X"])
     assert calls[0] == ("idx", "^X") and "Cache warm" in capsys.readouterr().out
+
+
+def test_stale_thresholds_are_the_documented_constants(cache):
+    assert (mc.OHLC_STALE_HOURS, mc.FUND_STALE_DAYS, mc.INDEX_STALE_HOURS) == (20, 7, 20)
+    expected = str(_last_weekday(date.today() - timedelta(days=1)))
+    cache._meta["a"] = _entry(25, expected)
+    cache._meta["b"] = _entry(19, expected)
+    assert (
+        cache._is_stale("a", mc.OHLC_STALE_HOURS) is True
+        and cache._is_stale("b", mc.OHLC_STALE_HOURS) is False
+    )
+
+
+def test_get_ohlc_start_equal_to_today_skips_download(cache, monkeypatch):
+    yesterday = date.today() - timedelta(days=1)
+    df = _ohlc(end=yesterday, n=30)
+    cache._write_parquet(cache._ohlc_path("X"), df)
+    cache._meta["ohlc:X"] = {
+        "updated": (datetime.now() - timedelta(hours=30)).isoformat(),
+        "to": str(yesterday),
+        "rows": 30,
+    }
+    f = _yf(monkeypatch, RuntimeError("must not download"))
+    assert (
+        len(cache.get_ohlc("X")) == 30 and f.calls == []
+    )  # the first missing day is today: nothing to fetch yet
+
+
+def test_get_ohlc_incremental_overlap_keeps_the_newest_bar(cache, monkeypatch):
+    old_end = _last_weekday(date.today() - timedelta(days=6))
+    old = _ohlc(end=old_end, n=60)
+    cache._write_parquet(cache._ohlc_path("X"), old)
+    cache._update_meta("ohlc:X", cache._ohlc_path("X"), old)
+    revised = old.iloc[[-1]].copy()
+    revised[["Open", "High", "Low", "Close"]] = 999.0  # the vendor restates the last bar
+    new_end = _last_weekday(date.today() - timedelta(days=1))
+    fresh = pd.concat(
+        [revised, _ohlc(end=new_end, n=3, seed=8).loc[lambda d: d.index > pd.Timestamp(old_end)]]
+    )
+    _yf(monkeypatch, fresh)
+    out = cache.get_ohlc("X")
+    assert out.loc[pd.Timestamp(old_end), "Close"] == 999.0 and out.index.is_unique
+
+
+def test_get_financials_refetches_after_seven_days(cache, monkeypatch):
+    calls = []
+
+    class Yf:
+        @staticmethod
+        def Ticker(t):
+            calls.append(t)
+            return _T()
+
+    monkeypatch.setattr(mc, "yf", Yf, raising=False)
+    monkeypatch.setattr(mc, "_YF_OK", True)
+    cache.get_financials("TCS.NS")
+    cache._meta["fund:TCS.NS:annual"]["updated"] = (datetime.now() - timedelta(days=6)).isoformat()
+    cache.get_financials("TCS.NS")
+    assert len(calls) == 1  # 6 days old: still fresh
+    cache._meta["fund:TCS.NS:annual"]["updated"] = (datetime.now() - timedelta(days=8)).isoformat()
+    cache.get_financials("TCS.NS")
+    assert len(calls) == 2  # 8 days old: refetched
+
+
+def test_report_age_buckets(cache):
+    cache._meta = {
+        "ohlc:A": {"rows": 1, "updated": (datetime.now() - timedelta(minutes=90)).isoformat()},
+        "ohlc:B": {"rows": 1, "updated": (datetime.now() - timedelta(minutes=59)).isoformat()},
+        "ohlc:C": {"rows": 1, "updated": (datetime.now() - timedelta(hours=25)).isoformat()},
+    }
+    assert cache.report()["Age"].tolist() == ["1h", "59m", "1d"]

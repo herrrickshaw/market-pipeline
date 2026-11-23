@@ -147,7 +147,9 @@ def test_yf_financials_prefers_new_names_without_truth_value_error(mods):
 # ---------------------------------------------------------------- darvas box
 def _bars(highs, lows=None, closes=None):
     lows = lows if lows is not None else [h - 1 for h in highs]
-    closes = closes if closes is not None else [(h + l) / 2 for h, l in zip(highs, lows)]
+    closes = (
+        closes if closes is not None else [(h + l) / 2 for h, l in zip(highs, lows, strict=False)]
+    )
     return pd.DataFrame({"High": highs, "Low": lows, "Close": closes})
 
 
@@ -203,7 +205,7 @@ def test_darvas_box_signals_and_geometry(mod):
         df = _bars(
             highs + [close + 1],
             lows + [close - 1],
-            [(h + l) / 2 for h, l in zip(highs, lows)] + [close],
+            [(h + l) / 2 for h, l in zip(highs, lows, strict=False)] + [close],
         )
         r = mod.compute_darvas_box(df)
         assert r["signal"] == signal, (close, r)
@@ -222,7 +224,7 @@ def test_darvas_box_signals_and_geometry(mod):
 def test_darvas_equality_with_box_edges_stays_in_box(mod):
     highs, lows = _box_series()
     for close in (110.0, 100.0):
-        df = _bars(highs + [close], lows + [close], [h for h in highs] + [close])
+        df = _bars(highs + [close], lows + [close], list(highs) + [close])
         assert mod.compute_darvas_box(df)["signal"] == "IN_BOX"
 
 
@@ -584,8 +586,8 @@ def test_fetch_options_pcr_and_max_pain_match_brute_force(us):
     r = us.fetch_options_data(t)
 
     def pain(p):
-        return sum(max(0, p - k) * v for k, v in zip(strikes, c_oi)) + sum(
-            max(0, k - p) * v for k, v in zip(strikes, p_oi)
+        return sum(max(0, p - k) * v for k, v in zip(strikes, c_oi, strict=False)) + sum(
+            max(0, k - p) * v for k, v in zip(strikes, p_oi, strict=False)
         )
 
     assert r["max_pain"] == min(strikes, key=pain) and r["expiry_date"] == "2026-08-21"
@@ -681,3 +683,51 @@ def test_display_functions_print_without_error(mods, capsys):
     us.display_coffee_can({"symbol": "X", "error": "boom"})
     out = capsys.readouterr().out
     assert "DARVAS" in out.upper() and "PIOTROSKI" in out.upper() and "boom" in out
+
+
+def _broken(*keys):
+    t = _ticker_good()
+    edits = {
+        "F5": lambda: t.balance_sheet.loc.__setitem__("Long Term Debt", [300.0, 100.0]),
+        "F6": lambda: t.balance_sheet.loc.__setitem__("Current Assets", [300.0, 400.0]),
+        "F7": lambda: t.balance_sheet.loc.__setitem__("Share Issued", [120.0, 100.0]),
+        "F8": lambda: t.income_stmt.loc.__setitem__("Gross Profit", [100.0, 360.0]),
+        "F9": lambda: t.income_stmt.loc.__setitem__("Total Revenue", [700.0, 800.0]),
+        "F2": lambda: t.cash_flow.loc.__setitem__("Operating Cash Flow", [-5.0, 90.0]),
+    }
+    for k in keys:
+        edits[k]()
+    return t
+
+
+@pytest.mark.parametrize(
+    "breaks,total,band",
+    [
+        ((), 9, "STRONG"),
+        (("F2",), 7, "STRONG"),
+        (("F2", "F5"), 6, "MODERATE"),
+        (("F2", "F5", "F6", "F7"), 4, "MODERATE"),
+        (("F2", "F5", "F6", "F7", "F8"), 3, "WEAK"),
+        (("F2", "F5", "F6", "F7", "F8", "F9"), 2, "WEAK"),
+    ],  # F2 also fails the F4 accrual test
+)
+@pytest.mark.parametrize("name", ["us_stock_daily_report", "sg_stock_daily_report"])
+def test_piotroski_band_boundaries(mods, name, breaks, total, band):
+    r = mods[name].compute_piotroski_score(_broken(*breaks), "X")
+    assert r["f_score"] == total and r["interpretation"].startswith(band)
+
+
+def test_coffee_can_roe_threshold_is_strictly_above_fifteen(mods):
+    m = mods["us_stock_daily_report"]
+    t = _coffee_ticker()
+    t.income_stmt.loc["Net Income"] = [150.0, 150.0, 150.0, 150.0]
+    t.balance_sheet.loc["Stockholders Equity"] = [1000.0, 1000.0, 1000.0, 1000.0]  # ROE exactly 15%
+    assert m.compute_coffee_can(t, "X")["criteria"]["C2_ROE_gt15"] == 0
+
+
+def test_options_put_call_ratio_of_exactly_one_is_not_bullish(mods):
+    us = mods["us_stock_daily_report"]
+    t = types.SimpleNamespace(
+        options=["x"], option_chain=lambda e: _chain([10.0, 10.0], [10.0, 10.0], [1.0, 2.0])
+    )
+    assert us.fetch_options_data(t)["sentiment"] == "Bearish (PCR≤1)"

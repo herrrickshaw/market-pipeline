@@ -242,6 +242,53 @@ def test_comoving_pairs_finds_correlated_and_ignores_independent():
     assert pairs["Correlation"].iloc[0] > 0.95
 
 
+def _pair_frames(rho, n=260, seed=5):
+    rng = np.random.default_rng(seed)
+    a = rng.normal(0, 0.01, n)
+    b = rho * a + np.sqrt(1 - rho**2) * rng.normal(0, 0.01, n)
+    idx = pd.bdate_range("2023-01-02", periods=n + 1)
+    mk = lambda r: pd.DataFrame({"Close": 100 * np.cumprod(1 + np.r_[0, r])}, index=idx)  # noqa: E731
+    return {"A": mk(a), "B": mk(b)}, pd.DataFrame({"symbol": ["A", "B"], "avg_dollar_vol": [2, 1]})
+
+
+def test_comoving_pairs_correlation_threshold_and_two_name_minimum():
+    cleaned, fm = _pair_frames(0.95)
+    assert len(pdx.find_comoving_pairs(cleaned, fm)) == 1  # exactly two names can form a pair
+    # a third name correlated ~0.7 with the first must NOT be paired (cut-off is 0.80)
+    rng = np.random.default_rng(11)
+    a = cleaned["A"]["Close"].pct_change().fillna(0).values
+    c = 0.7 * a + np.sqrt(1 - 0.49) * rng.normal(0, 0.01, len(a))
+    cleaned["C"] = pd.DataFrame({"Close": 100 * np.cumprod(1 + c)}, index=cleaned["A"].index)
+    fm = pd.DataFrame({"symbol": ["A", "B", "C"], "avg_dollar_vol": [3, 2, 1]})
+    corr = pd.DataFrame(
+        {k: v["Close"].pct_change().dropna().tail(252) for k, v in cleaned.items()}
+    ).corr()
+    assert 0.55 < corr.loc["A", "C"] < 0.8
+    assert pdx.find_comoving_pairs(cleaned, fm)[["Stock_A", "Stock_B"]].values.tolist() == [
+        ["A", "B"]
+    ]
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=KeyError,
+    reason="source bug: when no pair clears the 0.80 cut-off the empty rows list becomes a column-less "
+    "DataFrame and .sort_values('Correlation') raises KeyError instead of returning an empty table",
+)
+def test_comoving_pairs_none_above_cutoff_returns_empty():
+    cleaned, fm = _pair_frames(0.0)
+    assert pdx.find_comoving_pairs(cleaned, fm).empty
+
+
+def test_comoving_pairs_need_two_hundred_return_observations():
+    cleaned, fm = _pair_frames(0.95, n=200)  # 200 returns -> kept
+    assert len(pdx.find_comoving_pairs(cleaned, fm)) == 1
+    cleaned, fm = _pair_frames(
+        0.95, n=199
+    )  # 199 returns -> both names dropped -> fewer than two series
+    assert pdx.find_comoving_pairs(cleaned, fm).empty
+
+
 def test_comoving_pairs_too_few_or_top_n_cap():
     fm = pd.DataFrame({"symbol": ["A"], "avg_dollar_vol": [1]})
     assert pdx.find_comoving_pairs({"A": _ohlcv()}, fm).empty
@@ -339,9 +386,15 @@ def test_discover_clusters_labels_every_stock():
     assert {"pc1", "pc2", "is_anomaly"} <= set(fm.columns) and len(evr) == 5
 
 
+def test_supervised_drivers_guard_needs_a_hundred_labelled_rows(monkeypatch):
+    assert pdx.supervised_drivers(_big_fm(99)).empty  # returns before any sklearn symbol is touched
+    fm = _big_fm(120)
+    fm.loc[:20, "_target_fwd21"] = np.nan  # 99 usable labels
+    assert pdx.supervised_drivers(fm).empty
+
+
 def test_supervised_drivers_needs_hundred_rows_and_finds_signal():
     pytest.importorskip("sklearn")
-    assert pdx.supervised_drivers(_big_fm(99)).empty
     imp = pdx.supervised_drivers(_big_fm(120))
     assert imp["Feature"].iloc[0] == "ret_1m" and imp["Importance"].is_monotonic_decreasing
     assert imp["Importance%"].sum() == pytest.approx(100, abs=2)

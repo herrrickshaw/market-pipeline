@@ -22,9 +22,11 @@ class FakeModel:
 
     value = 0.0
     last_fit_shape = None
+    last_y = None
 
     def fit(self, X, y):
         FakeModel.last_fit_shape = X.shape
+        FakeModel.last_y = np.asarray(y)
         self.mean = float(np.mean(y))
         return self
 
@@ -294,3 +296,36 @@ def test_compare_models_table_and_split(fake_sk, monkeypatch, capsys):
     assert (
         out.loc[2, "Train_RMSE"] <= out.loc[0, "Train_RMSE"] + 1e-9
     )  # mean predictor is optimal for MSE
+
+
+def _aligned_target(df):
+    feats = ml.compute_features(df)
+    close = df["Close"].astype(float).reindex(feats.index)
+    tgt = close.pct_change(ml.PREDICT_DAYS).shift(-ml.PREDICT_DAYS) * 100
+    return feats.join(tgt.rename("target"), how="inner").dropna()
+
+
+def test_predict_needs_about_476_rows_in_practice(fake_sk):
+    # compute_features loses 199 warm-up rows; the guard len(features) >= MIN_ROWS - 50 (=277) then binds
+    assert ml.MIN_ROWS == 327
+    assert ml.MLSignalEngine().predict("X", _ohlc(475))["direction"] == "INSUFFICIENT_DATA"
+    assert ml.MLSignalEngine().predict("X", _ohlc(476))["direction"] != "INSUFFICIENT_DATA"
+
+
+def test_predict_trains_on_targets_that_end_before_the_holdout(fake_sk):
+    df = _ohlc(600)
+    ml.MLSignalEngine().predict("X", df)
+    aligned = _aligned_target(df)
+    # the last training label is the target PREDICT_DAYS+2 rows before the end of the aligned data
+    assert FakeModel.last_y[-1] == pytest.approx(aligned["target"].iloc[-(ml.PREDICT_DAYS + 2)])
+    assert FakeModel.last_fit_shape[0] == ml.TRAIN_WINDOW - ml.LOOKBACK - ml.PREDICT_DAYS == 187
+
+
+def test_backtest_skips_samples_with_under_twenty_training_rows(fake_sk):
+    df = _ohlc(700, drift=0.002, vol=0.002)
+    idx = _aligned_target(df).index
+    # position ti has min(ti, 252) - 65 training rows: ti=84 -> 19 (skipped), ti=85 -> 20 (kept)
+    r = ml.MLSignalEngine().evaluate_on_backtest(
+        {"S": df}, str(idx[84].date()), str(idx[86].date())
+    )
+    assert r["n_predictions"] == 2

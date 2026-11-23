@@ -420,3 +420,22 @@ def test_main_interrupt_checkpoints_and_stops(paths, monkeypatch, capsys):
     assert _main(monkeypatch) == 0
     assert "interrupted — checkpointing" in capsys.readouterr().out and len(n) == 2
     assert len(ed.load_store()) > 0  # the first ticker's rows were saved
+
+
+def test_parse_includes_a_fiscal_year_ending_today():
+    today = dt.date.today()
+    start = today - dt.timedelta(days=364)
+    d = {
+        "facts": {"us-gaap": {"NetIncomeLoss": {"units": {"USD": [_e(str(start), str(today), 5)]}}}}
+    }
+    assert [r["fy_end"] for r in ed.parse_companyfacts(d)] == [str(today)]
+
+
+def test_main_does_not_checkpoint_before_fifty_tickers(paths, monkeypatch, capsys):
+    syms = [f"S{i:02d}" for i in range(26)]
+    monkeypatch.setattr(ed, "universe", lambda: syms)
+    monkeypatch.setattr(ed, "load_cik_map", lambda: {s: i + 1 for i, s in enumerate(syms)})
+    monkeypatch.setattr(ed, "fetch_companyfacts", lambda cik, s: None)
+    assert ed.CHECKPOINT_EVERY == 50
+    assert _main(monkeypatch) == 0
+    assert "checkpointed" not in capsys.readouterr().out

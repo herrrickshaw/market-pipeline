@@ -170,6 +170,18 @@ def test_load_returns_drops_sparse_columns(dirs):
     assert list(r.columns) == ["A"]
 
 
+def test_load_returns_coverage_threshold_is_ninety_percent_inclusive(dirs, monkeypatch):
+    monkeypatch.setattr(pb, "LOOKBACK", 100)
+    _px(300, seed=1).to_parquet(dirs / "cache" / "A.NS.parquet")
+    full = _px(300, seed=2)
+    last100 = full.index[-100:]
+    for gaps, kept in ((10, True), (11, False)):  # 90/100 present is kept; 89/100 is dropped
+        b = full.drop(last100[5 : 5 + gaps])
+        b.to_parquet(dirs / "cache" / "B.NS.parquet")
+        cols = list(pb.load_returns(["A", "B"], "IN").columns)
+        assert ("B" in cols) is kept
+
+
 def test_load_index_returns_by_market(dirs):
     _px(seed=5).to_parquet(dirs / "index" / "NSEI.parquet")
     _px(seed=6).to_parquet(dirs / "index" / "GSPC.parquet")
@@ -268,6 +280,11 @@ def test_optimise_guards():
         .isin(["S1", "S2"])
         .all()
     )
+
+
+def test_optimise_needs_sixty_aligned_rows_inclusive():
+    assert pb.optimise(_universe(3, n=60), 0.05) != {}
+    assert pb.optimise(_universe(3, n=59), 0.05) == {}
 
 
 def test_optimise_weights_sum_to_one_respect_cap_and_ordering():

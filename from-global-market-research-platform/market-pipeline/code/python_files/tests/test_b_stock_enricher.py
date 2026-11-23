@@ -369,3 +369,30 @@ def test_generate_stock_table_html_us_currency_and_edge_values():
 
 def test_generate_stock_table_html_empty():
     assert "No qualifying stocks" in se.generate_stock_table_html(pd.DataFrame())
+
+
+def test_fetch_one_four_key_info_is_treated_as_sparse(monkeypatch):
+    sparse = {
+        "shortName": "Sparse Co",
+        "sector": "bank",
+        "trailingPE": 10.0,
+        "exchange": "NSI",
+    }  # 4 keys
+    calls = _yf(monkeypatch, [sparse])
+    assert se._fetch_one("T", ".NS", retries=2)["company_name"] == "T" and len(calls) == 2
+    five = dict(sparse, forwardPE=9.0)
+    _yf(monkeypatch, [five])
+    assert se._fetch_one("T", ".NS")["company_name"] == "Sparse Co"
+
+
+def test_fetch_one_zone_uses_trailing_pe_before_forward(monkeypatch):
+    _yf(monkeypatch, [dict(_INFO, sector="Bank", trailingPE=10.0, forwardPE=30.0)])
+    assert (
+        se._fetch_one("T", ".NS")["pe_label"] == "BUY ZONE"
+    )  # bank buy band is <= 12; forward 30 would be SELL
+
+
+def test_enrich_stocks_progress_every_fifty(monkeypatch, capsys):
+    monkeypatch.setattr(se, "_fetch_one", lambda s, sfx, m: {"symbol": s})
+    se.enrich_stocks(pd.DataFrame({"Symbol": [f"S{i}" for i in range(26)]}), workers=1)
+    assert capsys.readouterr().out.count("enriched") == 1  # only the final line; none at 25

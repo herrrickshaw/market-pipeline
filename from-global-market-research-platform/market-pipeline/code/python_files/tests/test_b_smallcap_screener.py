@@ -330,3 +330,54 @@ def test_main_screen_and_usage(monkeypatch, capsys):
     assert sc.main() == 7
     monkeypatch.setattr(sys, "argv", ["smallcap_screener.py"])
     assert sc.main() != 7
+
+
+def test_flags_downtrend_requires_strictly_below_the_average():
+    px, tv = _panel()
+    px.iloc[:, 0] = 100.0  # flat: last == 200DMA exactly
+    assert not sc.flags(px, tv, 250, list(px.columns)).loc["S00", "downtrend"]
+
+
+def test_flags_downtrend_uses_a_two_hundred_bar_average():
+    px, tv = _panel()
+    s = np.r_[np.full(120, 200.0), np.full(130, 100.0), np.full(50, 100.0)]
+    px.iloc[:, 0] = s  # 200DMA ~150 (above last=100); 100DMA = 100 (equal to last)
+    assert sc.flags(px, tv, 250, list(px.columns)).loc["S00", "downtrend"]
+
+
+def test_flags_earnings_fall_requires_positive_year_ago_eps(monkeypatch):
+    px, tv = _panel()
+    n = len(px)
+    eps = pd.DataFrame(-1.0, index=px.index, columns=px.columns)
+    eps.iloc[: n - 100, :] = 0.0  # year-ago EPS is exactly zero
+    monkeypatch.setitem(sc._FUND, "pe", pd.DataFrame(10.0, index=px.index, columns=px.columns))
+    monkeypatch.setitem(sc._FUND, "z", pd.DataFrame(0.0, index=px.index, columns=px.columns))
+    monkeypatch.setitem(sc._FUND, "eps", eps)
+    f = sc.flags(px, tv, 280, list(px.columns), fundamentals=True)
+    assert f["lossmaking"].all() and not f["earnings_fall"].any()
+
+
+@pytest.mark.parametrize(
+    "n_band,n_dropped,expect_rows",
+    [(100, 5, True), (99, 5, False), (100, 4, False), (100, 80, True), (100, 81, False)],
+)
+def test_validate_formation_size_gates(monkeypatch, capsys, n_band, n_dropped, expect_rows):
+    px, tv = _panel(n=500, k=n_band, seed=3)
+    px.columns = tv.columns = [f"S{i:03d}" for i in range(n_band)]
+    _fake_study(monkeypatch, px, tv)
+    monkeypatch.setattr(sc, "BAND_LO", 0)
+    monkeypatch.setattr(sc, "BAND_HI", n_band)
+    drop = set(px.columns[:n_dropped])
+
+    def fake_flags(px_, tv_, i, cols, fundamentals=False):
+        f = pd.DataFrame(
+            False, index=list(cols), columns=["downtrend", "distress", "blowup", "untradeable"]
+        )
+        f["downtrend"] = [c in drop for c in cols]
+        f["excluded"] = f["downtrend"]
+        return f
+
+    monkeypatch.setattr(sc, "flags", fake_flags)
+    rc = sc.validate(_Args(hold=21, warmup=300))
+    out = capsys.readouterr().out
+    assert (rc == 0) is expect_rows and ("no periods" in out) is (not expect_rows)

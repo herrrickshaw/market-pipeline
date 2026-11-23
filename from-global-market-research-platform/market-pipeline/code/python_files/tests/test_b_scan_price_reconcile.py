@@ -285,3 +285,44 @@ def test_main_counts_failures_and_filters_market(monkeypatch, capsys):
         ["scan_price_reconcile.py", "--market", "US", "--sample", "3", "--tolerance", "1.5"],
     )
     assert sr.main() == 0 and calls == [("US", 3, 1.5)]
+
+
+def test_reconcile_workbook_one_day_old_is_stale(env, monkeypatch, capsys):
+    from datetime import timedelta
+
+    yday = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
+    _scan(env, [("A", 1.0, 5)], name=f"us_full_scan_{yday}_0300.xlsx")
+    monkeypatch.setattr(sr, "fresh_quotes", lambda t: pytest.fail("must not fetch"))
+    assert sr.reconcile("US", 8, 2.0) is False and sr.MAX_SCAN_AGE_DAYS == 0
+    assert "1 day(s) old" in capsys.readouterr().out
+
+
+def test_reconcile_signature_fails_exactly_at_the_quorum(env, monkeypatch):
+    _scan(env, [("A", 100.0, 9), ("B", 50.0, 8), ("C", 25.0, 7), ("D", 10.0, 6)])
+    wh = pd.DataFrame(
+        {"symbol": ["A", "B", "C", "D"], "ltp": [100.0, 50.0, 26.0, 11.0]}
+    )  # 2 of 4 exact
+    monkeypatch.setattr(sr, "warehouse_prev_close", lambda m: wh)
+    monkeypatch.setattr(sr, "fresh_quotes", lambda t: pytest.fail("short-circuits"))
+    assert sr.reconcile("US", 4, 2.0) is False  # quorum(4) == 2 -> two exact matches already fail
+
+
+def test_reconcile_without_live_quotes_fails_on_two_signatures_of_five(env, monkeypatch):
+    _scan(env, [(f"S{i}", 100.0 + i, 9 - i) for i in range(5)])
+    wh = pd.DataFrame({"symbol": [f"S{i}" for i in range(5)], "ltp": [100.0, 101.0, 0.0, 0.0, 0.0]})
+    monkeypatch.setattr(sr, "warehouse_prev_close", lambda m: wh)
+    monkeypatch.setattr(sr, "fresh_quotes", lambda t: {})
+    assert sr._quorum(5) == 3
+    assert sr.reconcile("US", 5, 2.0) is False  # 2 matches < quorum, but not < max(2, 5 // 2) == 2
+
+
+def test_reconcile_signature_requires_an_essentially_exact_price_match(env, monkeypatch):
+    _scan(env, [("A", 100.005, 9), ("B", 50.005, 8), ("C", 25.005, 7), ("D", 10.005, 6)])
+    wh = pd.DataFrame(
+        {"symbol": ["A", "B", "C", "D"], "ltp": [100.0, 50.0, 25.0, 10.0]}
+    )  # 0.5 paise apart
+    monkeypatch.setattr(sr, "warehouse_prev_close", lambda m: wh)
+    monkeypatch.setattr(
+        sr, "fresh_quotes", lambda t: dict(zip(t, [100.005, 50.005, 25.005, 10.005], strict=False))
+    )
+    assert sr.reconcile("US", 4, 2.0) is True

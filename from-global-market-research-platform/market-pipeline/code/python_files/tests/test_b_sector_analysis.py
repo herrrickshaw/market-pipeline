@@ -347,3 +347,13 @@ def test_main_guards(env, monkeypatch, capsys):
     )
     sa.main("IN")
     assert "Not enough sectors with data." in capsys.readouterr().out
+
+
+def test_fingerprint_beta_needs_more_than_thirty_aligned_observations():
+    m = _series(300, 5)
+    sparse = pd.concat([m.iloc[:31], pd.Series(np.nan, index=m.index[31:])])
+    assert sa.sector_fingerprint(m * 2, sparse)["beta_to_market"] == pytest.approx(
+        2.0, abs=1e-3
+    )  # 31 > 30
+    sparse30 = pd.concat([m.iloc[:30], pd.Series(np.nan, index=m.index[30:])])
+    assert sa.sector_fingerprint(m * 2, sparse30)["beta_to_market"] == 1.0  # 30 is not enough
