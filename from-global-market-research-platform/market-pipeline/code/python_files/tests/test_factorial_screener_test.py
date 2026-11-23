@@ -8,6 +8,12 @@ import pytest
 import factorial_screener_test as FS
 
 
+@pytest.fixture(autouse=True)
+def _us_benchmark(monkeypatch):
+    # importing factorial_screener_test_IN (e.g. via factor_zscore_panel) rebinds this global
+    monkeypatch.setattr(FS, "BENCHMARK_SYMBOL", "SPY")
+
+
 def panel(series, start="2015-01-05", volume=1000.0, high_mult=1.0):
     """Long OHLCV panel from {symbol: close array}; High = Close * high_mult."""
     frames = []

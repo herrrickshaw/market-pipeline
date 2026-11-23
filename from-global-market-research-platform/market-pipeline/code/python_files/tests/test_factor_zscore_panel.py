@@ -10,7 +10,11 @@ import pytest
 # machine where that directory exists it would shadow this repo's modules for every test
 # collected afterwards. Undo that side effect right after the import.
 _PATH_BEFORE = list(sys.path)
+# import the helper modules from THIS repo first so the developer-path copy can never be picked up
 import factor_zscore_panel as FZ  # noqa: E402
+import factorial_screener_test  # noqa: E402,F401
+import factorial_screener_test_IN  # noqa: E402,F401
+import factorial_screener_test_IN_full  # noqa: E402,F401
 
 sys.path[:] = _PATH_BEFORE
 
