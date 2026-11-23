@@ -153,9 +153,7 @@ def test_load_returns_min_bars_lookback_and_coverage(dirs):
     _px(n=250, seed=2).to_parquet(dirs / "cache" / "B.NS.parquet")
     _px(n=249, seed=3).to_parquet(dirs / "cache" / "C.NS.parquet")
     r = pb.load_returns(["A", "MISSING"], "IN")
-    assert (
-        list(r.columns) == ["A"] and len(r) == pb.LOOKBACK and r["A"].notna().all()
-    )  # tail(LOOKBACK)
+    assert list(r.columns) == ["A"] and len(r) == 504 and r["A"].notna().all()  # tail(LOOKBACK)
     assert len(pb.load_returns(["B"], "IN")) == 249  # exactly 250 bars is allowed
     assert pb.load_returns(["C"], "IN").empty  # 249 bars is not
     assert pb.load_returns(["MISSING"], "IN").empty

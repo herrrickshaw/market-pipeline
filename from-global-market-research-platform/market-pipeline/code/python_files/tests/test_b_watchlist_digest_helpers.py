@@ -991,3 +991,8 @@ def test_why_listed_recurring_prefix_must_be_the_full_word():
         wd.why_listed("signal", "recurrent thing")
         == "screener signal (source not recorded) — recurrent thing"
     )
+
+
+def test_pick_category_recurring_prefix_must_be_the_full_word():
+    assert wd.pick_category({"status": "signal", "note": "recurring x2"}) == "recurring"
+    assert wd.pick_category({"status": "signal", "note": "recurrent x2"}) == "other"

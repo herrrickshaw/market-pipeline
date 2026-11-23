@@ -130,6 +130,10 @@ def test_extract_features_known_values_on_trend():
     assert f["dist_52w_high"] == pytest.approx(
         (cc[-1] - cc[-252:].max() * 1.01) / (cc[-252:].max() * 1.01) * 100
     )
+    r = pd.Series(c[: n - pdx.FWD]).pct_change().dropna()
+    assert f["vol_20d"] == pytest.approx(r.tail(20).std() * np.sqrt(252) * 100)
+    assert f["vol_60d"] == pytest.approx(r.tail(60).std() * np.sqrt(252) * 100)
+    assert f["vol_ratio"] == pytest.approx(f["vol_20d"] / f["vol_60d"])
     assert f["above_200dma_pct_days"] == pytest.approx(
         110 / 252 * 100
     )  # the 200DMA exists for 110 of the last 252 bars
@@ -254,16 +258,16 @@ def _pair_frames(rho, n=260, seed=5):
 def test_comoving_pairs_correlation_threshold_and_two_name_minimum():
     cleaned, fm = _pair_frames(0.95)
     assert len(pdx.find_comoving_pairs(cleaned, fm)) == 1  # exactly two names can form a pair
-    # a third name correlated ~0.7 with the first must NOT be paired (cut-off is 0.80)
+    # a third name correlated ~0.75 with the first must NOT be paired (cut-off is 0.80)
     rng = np.random.default_rng(11)
     a = cleaned["A"]["Close"].pct_change().fillna(0).values
-    c = 0.7 * a + np.sqrt(1 - 0.49) * rng.normal(0, 0.01, len(a))
+    c = 0.75 * a + np.sqrt(1 - 0.5625) * rng.normal(0, 0.01, len(a))
     cleaned["C"] = pd.DataFrame({"Close": 100 * np.cumprod(1 + c)}, index=cleaned["A"].index)
     fm = pd.DataFrame({"symbol": ["A", "B", "C"], "avg_dollar_vol": [3, 2, 1]})
     corr = pd.DataFrame(
         {k: v["Close"].pct_change().dropna().tail(252) for k, v in cleaned.items()}
     ).corr()
-    assert 0.55 < corr.loc["A", "C"] < 0.8
+    assert 0.71 < corr.loc["A", "C"] < 0.79
     assert pdx.find_comoving_pairs(cleaned, fm)[["Stock_A", "Stock_B"]].values.tolist() == [
         ["A", "B"]
     ]
