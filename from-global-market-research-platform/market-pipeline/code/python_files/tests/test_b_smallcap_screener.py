@@ -1,6 +1,5 @@
 """Offline tests for smallcap_screener (exclusion flags, validation report, constituent screen)."""
 
-import io
 import sys
 import types
 
@@ -15,7 +14,9 @@ def _panel(n=300, k=12, seed=0, turnover=5e7):
     rng = np.random.default_rng(seed)
     idx = pd.bdate_range("2021-01-04", periods=n)
     cols = [f"S{i:02d}" for i in range(k)]
-    px = pd.DataFrame(100 * np.cumprod(1 + rng.normal(0.0004, 0.01, (n, k)), axis=0), index=idx, columns=cols)
+    px = pd.DataFrame(
+        100 * np.cumprod(1 + rng.normal(0.0004, 0.01, (n, k)), axis=0), index=idx, columns=cols
+    )
     tv = pd.DataFrame(turnover, index=idx, columns=cols)
     return px, tv
 
@@ -25,7 +26,9 @@ def test_flags_columns_and_excluded_is_any_rule():
     px, tv = _panel()
     f = sc.flags(px, tv, 250, list(px.columns))
     assert list(f.columns) == ["downtrend", "distress", "blowup", "untradeable", "excluded"]
-    assert (f["excluded"] == f[["downtrend", "distress", "blowup", "untradeable"]].any(axis=1)).all()
+    assert (
+        f["excluded"] == f[["downtrend", "distress", "blowup", "untradeable"]].any(axis=1)
+    ).all()
     assert f["untradeable"].sum() == 0 and f.index.tolist() == list(px.columns)
 
 
@@ -47,14 +50,18 @@ def test_flags_distress_threshold_fifty_percent_of_three_year_high():
         s[249] = last  # bar i-1 for i=250
         px.iloc[:, j] = s
     f = sc.flags(px, tv, 250, list(px.columns))
-    assert f.loc["S00", "distress"] and not f.loc["S01", "distress"] and not f.loc["S02", "distress"]
+    assert (
+        f.loc["S00", "distress"] and not f.loc["S01", "distress"] and not f.loc["S02", "distress"]
+    )
 
 
 def test_flags_blowup_is_top_decile_of_volatility_strict():
     px, tv = _panel(k=11, seed=3)
     px.iloc[:, 5] = 100 * np.cumprod(1 + np.random.default_rng(9).normal(0, 0.08, len(px)))  # wild
     f = sc.flags(px, tv, 250, list(px.columns))
-    assert f.loc["S05", "blowup"] and f["blowup"].sum() == 1  # only strictly above the 90th percentile
+    assert (
+        f.loc["S05", "blowup"] and f["blowup"].sum() == 1
+    )  # only strictly above the 90th percentile
 
 
 def test_flags_untradeable_median_turnover_floor():
@@ -106,13 +113,17 @@ def fund(monkeypatch):
 def test_flags_fundamental_rules(fund):
     px, tv, preset = fund
     cols = list(px.columns)
-    preset(eps_now=pd.Series([-1.0, 0.0, 1.0] + [10.0] * 9, index=cols).values, eps_year=10.0, z=0.0)
+    preset(
+        eps_now=pd.Series([-1.0, 0.0, 1.0] + [10.0] * 9, index=cols).values, eps_year=10.0, z=0.0
+    )
     z = sc._FUND["z"].copy()
-    z.iloc[:, 3] = 2.0   # exactly 2.0 is not overvalued
+    z.iloc[:, 3] = 2.0  # exactly 2.0 is not overvalued
     z.iloc[:, 4] = 2.01
     sc._FUND["z"] = z
     f = sc.flags(px, tv, 280, cols, fundamentals=True)
-    assert f.loc["S00", "lossmaking"] and f.loc["S01", "lossmaking"] and not f.loc["S02", "lossmaking"]
+    assert (
+        f.loc["S00", "lossmaking"] and f.loc["S01", "lossmaking"] and not f.loc["S02", "lossmaking"]
+    )
     assert not f.loc["S03", "overvalued"] and f.loc["S04", "overvalued"]
     assert {"lossmaking", "overvalued", "earnings_fall"} <= set(f.columns)
     assert f.loc["S00", "excluded"] and f.loc["S04", "excluded"]
@@ -124,7 +135,11 @@ def test_flags_earnings_fall_needs_halving_from_a_positive_base(fund):
     now = pd.Series([4.9, 5.0, 5.1] + [10.0] * 9, index=cols)
     preset(eps_now=now.values, eps_year=10.0, z=0.0)
     f = sc.flags(px, tv, 280, cols, fundamentals=True)
-    assert f.loc["S00", "earnings_fall"] and not f.loc["S01", "earnings_fall"] and not f.loc["S02", "earnings_fall"]
+    assert (
+        f.loc["S00", "earnings_fall"]
+        and not f.loc["S01", "earnings_fall"]
+        and not f.loc["S02", "earnings_fall"]
+    )
     preset(eps_now=1.0, eps_year=-5.0, z=0.0)  # negative year-ago EPS: not an "earnings fall"
     assert not sc.flags(px, tv, 280, cols, fundamentals=True)["earnings_fall"].any()
 
@@ -171,7 +186,11 @@ def test_validate_report_tables_and_contaminated_names_dropped(monkeypatch, caps
     assert rc == 0
     assert "Small-cap exclusion rules — survivorship-free validation" in out
     assert "63-bar hold, 100bp charged" in out
-    for lbl in ("full band (the index proxy)", "SCREENED (exclusions removed)", "the excluded names"):
+    for lbl in (
+        "full band (the index proxy)",
+        "SCREENED (exclusions removed)",
+        "the excluded names",
+    ):
         assert lbl in out
     for rule in ("downtrend", "blowup"):  # rules that removed no names have no row
         assert f"| {rule} |" in out
@@ -194,7 +213,11 @@ def test_validate_verdict_text_and_cost_on_full_band(monkeypatch, capsys):
 
 # ---------------------------------------------------------------- screen
 def _cons_csv(rows):
-    return pd.DataFrame(rows, columns=["Company Name", "Industry", "Symbol"]).to_csv(index=False).encode()
+    return (
+        pd.DataFrame(rows, columns=["Company Name", "Industry", "Symbol"])
+        .to_csv(index=False)
+        .encode()
+    )
 
 
 def _screen_env(monkeypatch, tmp_path, px, tv):
@@ -221,8 +244,15 @@ def test_screen_downloads_caches_and_reports(monkeypatch, tmp_path, capsys):
     px, tv = _panel(n=300, k=12, seed=4)
     tv.iloc[:, 0] = 1.0  # S00 untradeable
     _screen_env(monkeypatch, tmp_path, px, tv)
-    body = _cons_csv([("Co A", "Banks", "S00"), ("Co B", "Banks", " S01 "), ("Co C", "IT", "S02"),
-                      ("Co D", "IT", "MISSING"), ("Co E", "IT", None)])
+    body = _cons_csv(
+        [
+            ("Co A", "Banks", "S00"),
+            ("Co B", "Banks", " S01 "),
+            ("Co C", "IT", "S02"),
+            ("Co D", "IT", "MISSING"),
+            ("Co E", "IT", None),
+        ]
+    )
     seen = {}
 
     def urlopen(req, timeout):
@@ -253,7 +283,9 @@ def test_screen_falls_back_to_cache_or_fails(monkeypatch, tmp_path, capsys):
     assert "constituent fetch failed and no cache" in capsys.readouterr().out
     cache = tmp_path / "cache_seed"
     cache.mkdir()
-    (cache / "smallcap250_constituents.csv").write_bytes(_cons_csv([("Co A", "Banks", "S00"), ("Co B", "IT", "S01"), ("Co C", "IT", "S02")]))
+    (cache / "smallcap250_constituents.csv").write_bytes(
+        _cons_csv([("Co A", "Banks", "S00"), ("Co B", "IT", "S01"), ("Co C", "IT", "S02")])
+    )
     assert sc.screen(types.SimpleNamespace(fundamentals=False)) == 0
     assert "using cache" in capsys.readouterr().out
 
@@ -261,7 +293,9 @@ def test_screen_falls_back_to_cache_or_fails(monkeypatch, tmp_path, capsys):
 def test_screen_rejects_non_csv_shell_and_uses_cache(monkeypatch, tmp_path, capsys):
     px, tv = _panel(n=300, k=12, seed=4)
     _screen_env(monkeypatch, tmp_path, px, tv)
-    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout: _Resp(b"<html>SPA shell</html>"))
+    monkeypatch.setattr(
+        "urllib.request.urlopen", lambda req, timeout: _Resp(b"<html>SPA shell</html>")
+    )
     assert sc.screen(types.SimpleNamespace(fundamentals=False)) == 1  # shell is not cached either
     assert not (tmp_path / "cache_seed" / "smallcap250_constituents.csv").exists()
 
@@ -270,7 +304,19 @@ def test_screen_rejects_non_csv_shell_and_uses_cache(monkeypatch, tmp_path, caps
 def test_main_validate_writes_report_file(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(sc, "HERE", tmp_path)
     monkeypatch.setattr(sc, "validate", lambda a: print("BODY LINE") or 0)
-    monkeypatch.setattr(sys, "argv", ["smallcap_screener.py", "--validate", "--hold", "252", "--warmup", "100", "--fundamentals"])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "smallcap_screener.py",
+            "--validate",
+            "--hold",
+            "252",
+            "--warmup",
+            "100",
+            "--fundamentals",
+        ],
+    )
     assert sc.main() == 0
     rp = tmp_path / "reports" / "smallcap_validation_hold252.md"
     text = rp.read_text()
