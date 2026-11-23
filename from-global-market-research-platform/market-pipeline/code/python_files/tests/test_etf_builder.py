@@ -209,3 +209,121 @@ def test_main_override_flag_gets_past_the_refusal(monkeypatch):
 
 def test_constants():
     assert {"IN"} == EB.UNADJUSTED and EB.WEIGHT_CAP == 0.10 and EB.COST_BPS == 10.0
+
+
+# ═══ main(): walk-forward report against faked loaders / sklearn / yfinance ═════
+import types  # noqa: E402
+
+
+class FakeLedoitWolf:
+    def fit(self, X):
+        self.covariance_ = np.cov(X, rowvar=False) + np.eye(X.shape[1]) * 1e-6
+        return self
+
+
+def synthetic_panel(n_names=30, years=4, seed=0):
+    rng = np.random.default_rng(seed)
+    idx = pd.bdate_range("2016-01-04", periods=252 * years)
+    mkt = rng.normal(0.0004, 0.008, len(idx))
+    cols = {}
+    for i in range(n_names):
+        beta = 0.5 + 0.05 * i
+        r = beta * mkt + rng.normal(0, 0.01, len(idx))
+        cols[f"S{i:02d}"] = 100 * np.cumprod(1 + r)
+    px = pd.DataFrame(cols, index=idx)
+    tv = pd.DataFrame({c: 1e6 * (1 + k) for k, c in enumerate(px.columns)}, index=idx)
+    return px, tv
+
+
+@pytest.fixture
+def main_env(tmp_path, monkeypatch):
+    px, tv = synthetic_panel()
+    monkeypatch.setattr(EB, "load_panel", lambda m: (px, tv))
+    monkeypatch.setattr(EB, "OUT_MD", tmp_path / "etf.md")
+    monkeypatch.setitem(sys.modules, "sklearn", types.SimpleNamespace())
+    monkeypatch.setitem(
+        sys.modules, "sklearn.covariance", types.SimpleNamespace(LedoitWolf=FakeLedoitWolf)
+    )
+    return px
+
+
+def fake_yf(monkeypatch, series=None, boom=False):
+    class Ticker:
+        def __init__(self, sym):
+            self.sym = sym
+
+        def history(self, start, end, auto_adjust):
+            if boom:
+                raise RuntimeError("no network")
+            s = series
+            return pd.DataFrame({"Close": s.values}, index=s.index.tz_localize("UTC"))
+
+    monkeypatch.setitem(sys.modules, "yfinance", types.SimpleNamespace(Ticker=Ticker))
+
+
+def run_main(monkeypatch, *argv):
+    monkeypatch.setattr(sys, "argv", ["etf_builder", *argv])
+    return EB.main()
+
+
+def test_main_report_without_benchmark(main_env, monkeypatch, capsys):
+    fake_yf(monkeypatch, boom=True)
+    assert run_main(monkeypatch, "--market", "US", "--top", "25") == 0
+    md = EB.OUT_MD.read_text()
+    assert md.startswith("# ETF builder — US top-25, walk-forward, monthly rebalance")
+    for scheme in EB.SCHEMES:
+        assert f"| {scheme} |" in md
+    assert "benchmark SPY unavailable" in capsys.readouterr().out
+    assert "n/a" in md and "(the ETF you'd just buy)" not in md
+    assert "long-only, 10% cap, 10bp turnover cost" in md
+
+
+def test_main_report_with_benchmark_and_quarterly_rebalance(main_env, monkeypatch):
+    px = main_env
+    bench = pd.Series(100 * np.cumprod(1 + np.full(len(px), 0.0003)), index=px.index)
+    fake_yf(monkeypatch, bench)
+    assert run_main(monkeypatch, "--top", "25", "--rebalance", "QE", "--benchmark", "QQQ") == 0
+    md = EB.OUT_MD.read_text()
+    assert "quarterly rebalance" in md and "| **QQQ (the ETF you'd just buy)** |" in md
+    rows = [x for x in md.splitlines() if x.startswith("| 1/N equal")]
+    assert len(rows) == 1 and rows[0].count("|") == 10  # 9 cells, as the header
+
+
+def test_main_equal_weight_row_matches_hand_calculation(main_env, monkeypatch):
+    fake_yf(monkeypatch, boom=True)
+    run_main(monkeypatch, "--top", "30")
+    md = EB.OUT_MD.read_text()
+    row = [x for x in md.splitlines() if x.startswith("| 1/N equal")][0].split("|")
+    assert row[7].strip() == "+0.00%"  # vs 1/N: itself
+    assert row[8].strip() == "n/a"  # no benchmark
+
+
+def test_main_survives_a_scheme_that_raises(main_env, monkeypatch):
+    fake_yf(monkeypatch, boom=True)
+
+    def broken(R, mu, cov):
+        raise RuntimeError("solver blew up")
+
+    monkeypatch.setitem(EB.SCHEMES, "max-Sharpe", broken)
+    assert run_main(monkeypatch, "--top", "25") == 0
+    assert "| max-Sharpe |" in EB.OUT_MD.read_text()  # fell back to equal weights
+
+
+def test_main_nan_weights_fall_back_to_equal_and_negative_sum_too(main_env, monkeypatch):
+    fake_yf(monkeypatch, boom=True)
+    monkeypatch.setitem(EB.SCHEMES, "1/N equal", lambda R, mu, cov: np.full(R.shape[1], np.nan))
+    monkeypatch.setitem(EB.SCHEMES, "inverse-vol", lambda R, mu, cov: -np.ones(R.shape[1]))
+    assert run_main(monkeypatch, "--top", "25") == 0
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=IndexError,
+    reason="when no rebalance has >= 20 usable names, `idx` stays empty and main() "
+    "dereferences idx[0] for the header instead of reporting 'no periods'",
+)
+def test_main_too_few_names_reports_instead_of_crashing(main_env, monkeypatch):
+    px, tv = synthetic_panel(n_names=10)
+    monkeypatch.setattr(EB, "load_panel", lambda m: (px, tv))
+    fake_yf(monkeypatch, boom=True)
+    assert run_main(monkeypatch, "--top", "25") in (0, 1)
