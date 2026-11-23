@@ -22,21 +22,27 @@ def _w(repo, name, text):
 
 # ---------------------------------------------------------------- _code_lines
 def test_code_lines_drops_comments_blanks_and_docstrings_keeping_original_numbers():
-    text = '\n'.join([
-        '"""module doc',                           # 1
-        'with "/Users/x/Downloads/a" in prose',   # 2
-        '"""',                                     # 3
-        '# comment /Users/x/Downloads/b',          # 4
-        '',                                        # 5
-        'x = 1  # trailing',                       # 6
-        "y = 'a'  # note",                         # 7
-        "'''one-line doc'''",                      # 8
-        "def f():",                                # 9
-        '    """inline doc"""',                    # 10
-        '    return "/Users/x/real"',              # 11
-    ])
-    assert rt._code_lines(text) == [(6, "x = 1  # trailing".split("  #")[0]), (7, "y = 'a'"),
-                                    (9, "def f():"), (11, '    return "/Users/x/real"')]
+    text = "\n".join(
+        [
+            '"""module doc',  # 1
+            'with "/Users/x/Downloads/a" in prose',  # 2
+            '"""',  # 3
+            "# comment /Users/x/Downloads/b",  # 4
+            "",  # 5
+            "x = 1  # trailing",  # 6
+            "y = 'a'  # note",  # 7
+            "'''one-line doc'''",  # 8
+            "def f():",  # 9
+            '    """inline doc"""',  # 10
+            '    return "/Users/x/real"',  # 11
+        ]
+    )
+    assert rt._code_lines(text) == [
+        (6, ["x = 1", " trailing"][0]),
+        (7, "y = 'a'"),
+        (9, "def f():"),
+        (11, '    return "/Users/x/real"'),
+    ]
 
 
 def test_code_lines_strips_inline_comment_only_after_two_spaces():
@@ -52,11 +58,13 @@ def test_code_lines_docstring_end_delimiter_on_same_line_as_text():
 # ---------------------------------------------------------------- regexes
 @pytest.mark.parametrize(
     "line,fatal,drift",
-    [('p = Path.home() / "Downloads" / "x"', True, False),
-     ('p = Path.home()/"Downloads"', True, False),
-     ('p = "/Users/bob/Downloads/code"', True, True),
-     ('p = "/Users/bob/repos/x"', False, True),
-     ('p = "/tmp/x"', False, False)],
+    [
+        ('p = Path.home() / "Downloads" / "x"', True, False),
+        ('p = Path.home()/"Downloads"', True, False),
+        ('p = "/Users/bob/Downloads/code"', True, True),
+        ('p = "/Users/bob/repos/x"', False, True),
+        ('p = "/tmp/x"', False, False),
+    ],
 )
 def test_path_regexes(line, fatal, drift):
     assert bool(rt.TCC_FATAL_RE.search(line)) is fatal
@@ -67,7 +75,11 @@ def test_env_idiom_and_invoke_regexes():
     assert rt.ENV_IDIOM_RE.search('os.environ.get("MARKET_CACHE", x)')
     assert rt.ENV_IDIOM_RE.search('environ.get( "PGDSN")')
     assert not rt.ENV_IDIOM_RE.search('os.environ.get("HOME")')
-    assert rt.INVOKE_RE.findall("$PY -u scan.py --x\n$PY mail.py\n$PY -u -O other.py") == ["scan.py", "mail.py", "other.py"]
+    assert rt.INVOKE_RE.findall("$PY -u scan.py --x\n$PY mail.py\n$PY -u -O other.py") == [
+        "scan.py",
+        "mail.py",
+        "other.py",
+    ]
     assert not rt.INVOKE_RE.findall("python scan.py")
 
 
@@ -84,15 +96,27 @@ def test_section_wiring_collects_invocations_and_local_inline_imports(repo):
 # ---------------------------------------------------------------- path_audit
 def test_path_audit_severities_and_ordering(repo):
     _w(repo, "fatal.py", 'p = Path.home() / "Downloads" / "x"\n')
-    _w(repo, "ok.py", 'import os\nroot = os.environ.get("MARKET_CACHE", Path.home() / "Downloads")\n')
+    _w(
+        repo,
+        "ok.py",
+        'import os\nroot = os.environ.get("MARKET_CACHE", Path.home() / "Downloads")\n',
+    )
     _w(repo, "drift.py", 'p = "/Users/me/repos/thing"\nq = "/Users/me/repos/other"\n')
     _w(repo, "clean.py", 'p = "/tmp/x"\n')
     _w(repo, "prose.py", '"""uses /Users/me/Downloads/x"""\n# "/Users/me/y"\n')
     _w(repo, ".hidden.py", 'p = "/Users/me/z"\n')
     res = rt.path_audit()
-    assert [(f["file"], f["severity"]) for f in res] == [("fatal.py", "TCC-FATAL"), ("drift.py", "DRIFT"), ("ok.py", "OK-ish")]
+    assert [(f["file"], f["severity"]) for f in res] == [
+        ("fatal.py", "TCC-FATAL"),
+        ("drift.py", "DRIFT"),
+        ("ok.py", "OK-ish"),
+    ]
     drift = res[1]
-    assert drift["drift_lines"] == [1, 2] and drift["fatal_lines"] == [] and drift["has_env_escape"] is False
+    assert (
+        drift["drift_lines"] == [1, 2]
+        and drift["fatal_lines"] == []
+        and drift["has_env_escape"] is False
+    )
     assert res[0]["lines"] == [1] and res[2]["has_env_escape"] is True
 
 
@@ -141,7 +165,9 @@ def test_orphans_ignores_wired_names_that_do_not_exist(repo):
 def test_git_state_parses_porcelain(monkeypatch):
     def run(cmd, cwd, capture_output, text, timeout):
         if cmd[1] == "status":
-            return types.SimpleNamespace(stdout=" M a.py\n M b.py\nM  staged.py\n?? new.py\n?? other\n")
+            return types.SimpleNamespace(
+                stdout=" M a.py\n M b.py\nM  staged.py\n?? new.py\n?? other\n"
+            )
         return types.SimpleNamespace(stdout="feature\n")
 
     monkeypatch.setattr(rt.subprocess, "run", run)
@@ -175,7 +201,9 @@ def test_main_json_output(populated, monkeypatch, capsys):
     assert _main(monkeypatch, "--json") == 0
     out = json.loads(capsys.readouterr().out)
     assert [f["file"] for f in out["path_audit"]] == ["fatal.py", "drift.py"]
-    assert out["wiring"] == {"ingest.sh": ["drift.py", "ghost.py"]} and out["orphans"] == ["fatal.py"]
+    assert out["wiring"] == {"ingest.sh": ["drift.py", "ghost.py"]} and out["orphans"] == [
+        "fatal.py"
+    ]
     assert out["git"]["branch"] == "main"
 
 
