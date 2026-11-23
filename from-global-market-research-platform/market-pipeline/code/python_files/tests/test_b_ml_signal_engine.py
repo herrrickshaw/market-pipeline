@@ -10,13 +10,16 @@ import ml_signal_engine as ml
 def _ohlc(n=400, drift=0.0005, vol=0.01, seed=0, volume=1e6):
     rng = np.random.default_rng(seed)
     c = 100 * np.cumprod(1 + rng.normal(drift, vol, n))
-    return pd.DataFrame({"Open": c, "High": c * 1.01, "Low": c * 0.99, "Close": c,
-                         "Volume": np.full(n, volume)}, index=pd.bdate_range("2022-01-03", periods=n))
+    return pd.DataFrame(
+        {"Open": c, "High": c * 1.01, "Low": c * 0.99, "Close": c, "Volume": np.full(n, volume)},
+        index=pd.bdate_range("2022-01-03", periods=n),
+    )
 
 
 # ---- fakes replacing scikit-learn ------------------------------------------------
 class FakeModel:
     """Predicts a constant (set via FakeModel.value), records the training matrix shape."""
+
     value = 0.0
     last_fit_shape = None
 
@@ -63,7 +66,9 @@ def test_compute_features_known_values():
     assert f.at[t, "ret_5d"] == pytest.approx((c.iloc[-1] / c.iloc[-6] - 1) * 100)
     assert f.at[t, "dma50_gap"] == pytest.approx((c.iloc[-1] / c.tail(50).mean() - 1) * 100)
     assert f.at[t, "dma200_gap"] == pytest.approx((c.iloc[-1] / c.tail(200).mean() - 1) * 100)
-    assert f.at[t, "hl_ratio"] == pytest.approx((c.iloc[-1] * 1.01 - c.iloc[-1] * 0.99) / c.iloc[-1])
+    assert f.at[t, "hl_ratio"] == pytest.approx(
+        (c.iloc[-1] * 1.01 - c.iloc[-1] * 0.99) / c.iloc[-1]
+    )
     mid, sd = c.tail(20).mean(), c.tail(20).std()
     assert f.at[t, "close_norm"] == pytest.approx((c.iloc[-1] - mid) / sd)
     assert f.at[t, "bb_pct"] == pytest.approx((c.iloc[-1] - (mid - 2 * sd)) / (4 * sd))
@@ -71,7 +76,9 @@ def test_compute_features_known_values():
     assert f.at[t, "vol_ratio"] == pytest.approx(1.0)  # constant volume
     ema12, ema26 = c.ewm(span=12, adjust=False).mean(), c.ewm(span=26, adjust=False).mean()
     assert f.at[t, "macd"] == pytest.approx(ema12.iloc[-1] - ema26.iloc[-1])
-    assert f.at[t, "macd_signal"] == pytest.approx((ema12 - ema26).ewm(span=9, adjust=False).mean().iloc[-1])
+    assert f.at[t, "macd_signal"] == pytest.approx(
+        (ema12 - ema26).ewm(span=9, adjust=False).mean().iloc[-1]
+    )
 
 
 def test_compute_features_rsi_range_and_direction():
@@ -156,8 +163,15 @@ def test_predict_exact_min_rows_boundary_does_not_short_circuit(fake_sk):
 
 @pytest.mark.parametrize(
     "value,direction",
-    [(0.5, "BULLISH"), (0.4999, "NEUTRAL"), (0.0, "NEUTRAL"), (-0.4999, "NEUTRAL"),
-     (-0.5, "BEARISH"), (3.0, "BULLISH"), (-3.0, "BEARISH")],
+    [
+        (0.5, "BULLISH"),
+        (0.4999, "NEUTRAL"),
+        (0.0, "NEUTRAL"),
+        (-0.4999, "NEUTRAL"),
+        (-0.5, "BEARISH"),
+        (3.0, "BULLISH"),
+        (-3.0, "BEARISH"),
+    ],
 )
 def test_predict_threshold_classification(fake_sk, value, direction):
     FakeModel.value = value
@@ -198,11 +212,16 @@ def test_predict_batch_sorted_by_prediction_with_summary(fake_sk, capsys, monkey
     preds = {"A": 1.0, "B": -2.0, "C": 0.0}
 
     def fake_predict(self, sym, df):
-        return {"symbol": sym, "direction": "BULLISH" if preds[sym] > 0.5 else (
-            "BEARISH" if preds[sym] < -0.5 else "NEUTRAL"), "predicted_ret%": preds[sym]}
+        return {
+            "symbol": sym,
+            "direction": "BULLISH"
+            if preds[sym] > 0.5
+            else ("BEARISH" if preds[sym] < -0.5 else "NEUTRAL"),
+            "predicted_ret%": preds[sym],
+        }
 
     monkeypatch.setattr(ml.MLSignalEngine, "predict", fake_predict)
-    df = ml.MLSignalEngine(model_type="lr").predict_batch({k: None for k in preds}, max_workers=2)
+    df = ml.MLSignalEngine(model_type="lr").predict_batch(dict.fromkeys(preds), max_workers=2)
     assert df["symbol"].tolist() == ["A", "C", "B"]
     out = capsys.readouterr().out
     assert "3/3 done | BULLISH: 1 | BEARISH: 1" in out and "ML signals computed: 3 stocks" in out
@@ -227,7 +246,9 @@ def test_predict_batch_empty(fake_sk):
 
 # ---------------------------------------------------------------- evaluate_on_backtest
 def test_backtest_no_predictions(fake_sk):
-    r = ml.MLSignalEngine().evaluate_on_backtest({"S": _ohlc(100), "N": None}, "2023-01-01", "2023-06-01")
+    r = ml.MLSignalEngine().evaluate_on_backtest(
+        {"S": _ohlc(100), "N": None}, "2023-01-01", "2023-06-01"
+    )
     assert r == {"error": "No test predictions generated"}
 
 
@@ -246,7 +267,9 @@ def test_backtest_metrics_hit_rate_and_period(fake_sk, capsys):
 def test_backtest_wrong_direction_scores_zero(fake_sk):
     FakeModel.value = -1.0
     df = _ohlc(600, drift=0.002, vol=0.002)
-    r = ml.MLSignalEngine().evaluate_on_backtest({"S": df}, str(df.index[450].date()), str(df.index[460].date()))
+    r = ml.MLSignalEngine().evaluate_on_backtest(
+        {"S": df}, str(df.index[450].date()), str(df.index[460].date())
+    )
     assert r["directional_acc"] == 0.0
 
 
@@ -268,4 +291,6 @@ def test_compare_models_table_and_split(fake_sk, monkeypatch, capsys):
     assert (out["Train_RMSE"] >= 0).all()
     text = capsys.readouterr().out
     assert "Model comparison for SYM (train=" in text and "Paper benchmark" in text
-    assert out.loc[2, "Train_RMSE"] <= out.loc[0, "Train_RMSE"] + 1e-9  # mean predictor is optimal for MSE
+    assert (
+        out.loc[2, "Train_RMSE"] <= out.loc[0, "Train_RMSE"] + 1e-9
+    )  # mean predictor is optimal for MSE
