@@ -39,49 +39,103 @@ def test_hash_order_dedupes_and_is_deterministic_non_alphabetical():
 
 # ---------------------------------------------------------------- _annual_series
 def test_annual_series_flow_span_window_inclusive():
-    units = {"USD": [_e("2024-01-01", "2024-11-26", 1),   # 330 days -> kept
-                     _e("2023-01-01", "2023-11-25", 2),   # 328 days -> dropped
-                     _e("2022-01-01", "2023-01-16", 3),   # 380 days -> kept
-                     _e("2021-01-01", "2022-01-17", 4)]}  # 381 days -> dropped
+    units = {
+        "USD": [
+            _e("2024-01-01", "2024-11-26", 1),  # 330 days -> kept
+            _e("2023-01-01", "2023-11-25", 2),  # 328 days -> dropped
+            _e("2022-01-01", "2023-01-16", 3),  # 380 days -> kept
+            _e("2021-01-01", "2022-01-17", 4),
+        ]
+    }  # 381 days -> dropped
     assert ed._annual_series(units, instant=False) == {"2024-11-26": 1, "2023-01-16": 3}
 
 
 def test_annual_series_latest_filing_wins_and_ordering_independent():
-    rows = [_e("2023-01-01", "2023-12-31", 101, filed="2025-02-01"),
-            _e("2023-01-01", "2023-12-31", 100, filed="2024-02-01")]
+    rows = [
+        _e("2023-01-01", "2023-12-31", 101, filed="2025-02-01"),
+        _e("2023-01-01", "2023-12-31", 100, filed="2024-02-01"),
+    ]
     assert ed._annual_series({"USD": rows}, False) == {"2023-12-31": 101}
     assert ed._annual_series({"USD": rows[::-1]}, False) == {"2023-12-31": 101}
 
 
 def test_annual_series_forms_units_and_missing_fields():
-    units = {"USD": [_e(None, "2023-12-31", 1, form="10-K"), _e(None, "2022-12-31", 2, form="20-F"),
-                     _e(None, "2021-12-31", 3, form="40-F/A"), _e(None, "2020-12-31", 4, form="10-Q"),
-                     _e(None, "2019-12-31", 5, form="8-K"), _e(None, "", 6), {"form": "10-K", "val": 7}],
-             "EUR": [_e(None, "2018-12-31", 8)], "shares": [_e(None, "2017-12-31", 9)]}
-    assert ed._annual_series(units, instant=True) == {"2017-12-31": 9, "2021-12-31": 3, "2022-12-31": 2, "2023-12-31": 1}
-    assert ed._annual_series({"USD": [_e(None, "2023-12-31", 1)]}, instant=False) == {}  # flow needs a start
+    units = {
+        "USD": [
+            _e(None, "2023-12-31", 1, form="10-K"),
+            _e(None, "2022-12-31", 2, form="20-F"),
+            _e(None, "2021-12-31", 3, form="40-F/A"),
+            _e(None, "2020-12-31", 4, form="10-Q"),
+            _e(None, "2019-12-31", 5, form="8-K"),
+            _e(None, "", 6),
+            {"form": "10-K", "val": 7},
+        ],
+        "EUR": [_e(None, "2018-12-31", 8)],
+        "shares": [_e(None, "2017-12-31", 9)],
+    }
+    assert ed._annual_series(units, instant=True) == {
+        "2017-12-31": 9,
+        "2021-12-31": 3,
+        "2022-12-31": 2,
+        "2023-12-31": 1,
+    }
+    assert (
+        ed._annual_series({"USD": [_e(None, "2023-12-31", 1)]}, instant=False) == {}
+    )  # flow needs a start
 
 
 # ---------------------------------------------------------------- parse_companyfacts
 def _doc():
-    return {"facts": {"us-gaap": {
-        "NetIncomeLoss": {"units": {"USD": [
-            _e("2023-01-01", "2023-12-31", 100, filed="2024-02-01"),
-            _e("2023-01-01", "2023-12-31", 101, filed="2025-02-01"),
-            _e("2024-01-01", "2024-12-31", 200),
-            _e("2024-10-01", "2024-12-31", 999)]}},
-        "Assets": {"units": {"USD": [_e(None, "2023-12-31", 1000, filed="2024-02-01"), _e(None, "2024-12-31", 1100)]}},
-        "LongTermDebtNoncurrent": {"units": {"USD": [_e(None, "2999-12-31", 555)]}},
-        "NetCashProvidedByUsedInOperatingActivities": {"units": {"USD": [_e("2024-01-01", "2024-12-31", 300)]}},
-        "PaymentsToAcquirePropertyPlantAndEquipment": {"units": {"USD": [_e("2024-01-01", "2024-12-31", 50)]}},
-    }, "dei": {"EntityCommonStockSharesOutstanding": {"units": {"shares": [
-        {"end": "2025-01-15", "val": 10}, {"end": "2024-01-15", "val": 8}]}}}}}
+    return {
+        "facts": {
+            "us-gaap": {
+                "NetIncomeLoss": {
+                    "units": {
+                        "USD": [
+                            _e("2023-01-01", "2023-12-31", 100, filed="2024-02-01"),
+                            _e("2023-01-01", "2023-12-31", 101, filed="2025-02-01"),
+                            _e("2024-01-01", "2024-12-31", 200),
+                            _e("2024-10-01", "2024-12-31", 999),
+                        ]
+                    }
+                },
+                "Assets": {
+                    "units": {
+                        "USD": [
+                            _e(None, "2023-12-31", 1000, filed="2024-02-01"),
+                            _e(None, "2024-12-31", 1100),
+                        ]
+                    }
+                },
+                "LongTermDebtNoncurrent": {"units": {"USD": [_e(None, "2999-12-31", 555)]}},
+                "NetCashProvidedByUsedInOperatingActivities": {
+                    "units": {"USD": [_e("2024-01-01", "2024-12-31", 300)]}
+                },
+                "PaymentsToAcquirePropertyPlantAndEquipment": {
+                    "units": {"USD": [_e("2024-01-01", "2024-12-31", 50)]}
+                },
+            },
+            "dei": {
+                "EntityCommonStockSharesOutstanding": {
+                    "units": {
+                        "shares": [
+                            {"end": "2025-01-15", "val": 10},
+                            {"end": "2024-01-15", "val": 8},
+                        ]
+                    }
+                }
+            },
+        }
+    }
 
 
 def test_parse_companyfacts_rows_values_and_derived_fields():
     rows = ed.parse_companyfacts(_doc())
     by = {r["fy_end"]: r for r in rows}
-    assert sorted(by) == ["2023-12-31", "2024-12-31"]  # future-dated debt maturity never mints a year
+    assert sorted(by) == [
+        "2023-12-31",
+        "2024-12-31",
+    ]  # future-dated debt maturity never mints a year
     assert by["2023-12-31"]["net_income"] == 101  # restated comparative
     assert by["2024-12-31"]["net_income"] == 200  # quarterly 999 excluded by span
     r = by["2024-12-31"]
@@ -94,40 +148,62 @@ def test_parse_companyfacts_rows_values_and_derived_fields():
 def test_parse_capex_stored_negative_regardless_of_sign():
     d = _doc()
     d["facts"]["us-gaap"]["PaymentsToAcquirePropertyPlantAndEquipment"]["units"]["USD"] = [
-        _e("2024-01-01", "2024-12-31", -50)]
+        _e("2024-01-01", "2024-12-31", -50)
+    ]
     assert {r["fy_end"]: r for r in ed.parse_companyfacts(d)}["2024-12-31"]["capex"] == -50
 
 
 def test_parse_shares_taken_from_nearest_dei_date():
     by = {r["fy_end"]: r for r in ed.parse_companyfacts(_doc())}
     assert by["2024-12-31"]["shares"] == 10  # 2025-01-15 is nearest
-    assert by["2023-12-31"]["shares"] == 8   # 2024-01-15 is nearest
+    assert by["2023-12-31"]["shares"] == 8  # 2024-01-15 is nearest
     d = _doc()
     del d["facts"]["dei"]
     assert all(r["shares"] is None for r in ed.parse_companyfacts(d))
 
 
 def test_parse_tag_priority_first_present_with_data_wins():
-    d = {"facts": {"us-gaap": {
-        "NetIncomeLoss": {"units": {"USD": [_e("2024-01-01", "2024-12-31", 1)]}},
-        "ProfitLoss": {"units": {"USD": [_e("2024-01-01", "2024-12-31", 2)]}},
-        "Revenues": {"units": {"USD": []}},  # present but empty -> falls through to next tag
-        "SalesRevenueNet": {"units": {"USD": [_e("2024-01-01", "2024-12-31", 9)]}}}}}
+    d = {
+        "facts": {
+            "us-gaap": {
+                "NetIncomeLoss": {"units": {"USD": [_e("2024-01-01", "2024-12-31", 1)]}},
+                "ProfitLoss": {"units": {"USD": [_e("2024-01-01", "2024-12-31", 2)]}},
+                "Revenues": {
+                    "units": {"USD": []}
+                },  # present but empty -> falls through to next tag
+                "SalesRevenueNet": {"units": {"USD": [_e("2024-01-01", "2024-12-31", 9)]}},
+            }
+        }
+    }
     r = ed.parse_companyfacts(d)[0]
     assert r["net_income"] == 1 and r["revenue"] == 9
 
 
 def test_parse_keeps_last_five_years_only_and_handles_empty():
     entries = [_e(f"{y}-01-01", f"{y}-12-31", y) for y in range(2015, 2025)]
-    rows = ed.parse_companyfacts({"facts": {"us-gaap": {"NetIncomeLoss": {"units": {"USD": entries}}}}})
+    rows = ed.parse_companyfacts(
+        {"facts": {"us-gaap": {"NetIncomeLoss": {"units": {"USD": entries}}}}}
+    )
     assert [r["fy_end"][:4] for r in rows] == ["2020", "2021", "2022", "2023", "2024"]
     assert ed.parse_companyfacts({}) == [] and ed.parse_companyfacts({"facts": {}}) == []
 
 
 def test_parse_future_year_end_excluded_even_for_flows():
     nxt = str(dt.date.today().year + 1)
-    d = {"facts": {"us-gaap": {"NetIncomeLoss": {"units": {"USD": [
-        _e(f"{nxt}-01-01", f"{nxt}-12-31", 1), _e("2023-01-01", "2023-12-31", 2)]}}}}}
+    d = {
+        "facts": {
+            "us-gaap": {
+                "NetIncomeLoss": {
+                    "units": {
+                        "USD": [
+                            _e(f"{nxt}-01-01", f"{nxt}-12-31", 1),
+                            _e("2023-01-01", "2023-12-31", 2),
+                        ]
+                    }
+                }
+            }
+        }
+    }
     assert [r["fy_end"] for r in ed.parse_companyfacts(d)] == ["2023-12-31"]
 
 
@@ -154,7 +230,11 @@ _RAW = {"0": {"ticker": "aapl", "cik_str": 320193}, "1": {"ticker": "MSFT", "cik
 
 def test_load_cik_map_downloads_caches_and_uppercases(paths, monkeypatch):
     calls = []
-    monkeypatch.setattr(ed.requests, "get", lambda url, headers, timeout: calls.append((url, headers, timeout)) or _Resp(_RAW))
+    monkeypatch.setattr(
+        ed.requests,
+        "get",
+        lambda url, headers, timeout: calls.append((url, headers, timeout)) or _Resp(_RAW),
+    )
     assert ed.load_cik_map() == {"AAPL": 320193, "MSFT": 789019}
     assert ed.CIK_CACHE.exists() and calls[0][2] == 30 and "@" in calls[0][1]["User-Agent"]
     monkeypatch.setattr(ed.requests, "get", lambda *a, **k: pytest.fail("cache should be used"))
@@ -209,10 +289,19 @@ def test_load_store_missing(paths):
 
 def test_save_store_merges_replaces_case_insensitively_and_backs_up(paths):
     s = ed.save_store(pd.DataFrame(), [_row("AAPL"), _row("MSFT")], "t1")
-    assert len(s) == 2 and (s["collected_at"] == "t1").all() and not ed.STORE.with_suffix(".parquet.bak").exists()
+    assert (
+        len(s) == 2
+        and (s["collected_at"] == "t1").all()
+        and not ed.STORE.with_suffix(".parquet.bak").exists()
+    )
     s2 = ed.save_store(s, [_row("aapl", cfo=9.0)], "t2")
-    assert sorted(s2["ticker"]) == ["MSFT", "aapl"] and s2.set_index("ticker").at["aapl", "cfo"] == 9.0
-    assert ed.STORE.with_suffix(".parquet.bak").exists() and not ed.STORE.with_suffix(".parquet.tmp").exists()
+    assert (
+        sorted(s2["ticker"]) == ["MSFT", "aapl"] and s2.set_index("ticker").at["aapl", "cfo"] == 9.0
+    )
+    assert (
+        ed.STORE.with_suffix(".parquet.bak").exists()
+        and not ed.STORE.with_suffix(".parquet.tmp").exists()
+    )
     assert len(ed.load_store()) == 2
 
 
@@ -246,8 +335,13 @@ def test_universe_reads_symbols_via_duckdb(paths, monkeypatch):
 def test_coverage_report(capsys):
     ed.coverage(pd.DataFrame())
     assert "store empty" in capsys.readouterr().out
-    store = pd.DataFrame({"ticker": ["AAPL", "aapl", "AMZN", "MSFT", "ZZZ"],
-                          "cfo": [1, 1, 1, 1, None], "total_assets": [1, 1, 1, 1, 1]})
+    store = pd.DataFrame(
+        {
+            "ticker": ["AAPL", "aapl", "AMZN", "MSFT", "ZZZ"],
+            "cfo": [1, 1, 1, 1, None],
+            "total_assets": [1, 1, 1, 1, 1],
+        }
+    )
     ed.coverage(store)
     out = capsys.readouterr().out
     assert "usable tickers (cfo+total_assets): 3" in out  # AAPL, AMZN, MSFT; ZZZ lacks cfo
@@ -291,7 +385,10 @@ def test_main_collects_skips_fresh_and_no_cik_and_limits(paths, monkeypatch, cap
     assert "universe 4 | no CIK 1 | fresh-skip 1 | fetching 2" in out
     assert "! CCC: boom" in out and "done: 1 fetched, 1 failed" in out
     store = ed.load_store()
-    assert set(store["ticker"]) == {"BBB", "AAA"} and (store[store.ticker == "AAA"]["net_income"].dropna() > 0).all()
+    assert (
+        set(store["ticker"]) == {"BBB", "AAA"}
+        and (store[store.ticker == "AAA"]["net_income"].dropna() > 0).all()
+    )
 
 
 def test_main_limit_stale_rows_and_checkpoint(paths, monkeypatch, capsys):

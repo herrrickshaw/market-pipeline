@@ -58,11 +58,17 @@ def _creds(monkeypatch, **extra):
 # ---------------------------------------------------------------- send: credential guards
 @pytest.mark.parametrize(
     "vals",
-    [{}, {"GMAIL_USER": "me@example.com"}, {"GMAIL_APP_PASSWORD": "x" * 16},
-     {"GMAIL_USER": "me@example.com", "GMAIL_APP_PASSWORD": "x" * 15},
-     {"GMAIL_USER": "me@example.com", "GMAIL_APP_PASSWORD": "PUT-YOUR-APP-PASSWORD-HERE"}],
+    [
+        {},
+        {"GMAIL_USER": "me@example.com"},
+        {"GMAIL_APP_PASSWORD": "x" * 16},
+        {"GMAIL_USER": "me@example.com", "GMAIL_APP_PASSWORD": "x" * 15},
+        {"GMAIL_USER": "me@example.com", "GMAIL_APP_PASSWORD": "PUT-YOUR-APP-PASSWORD-HERE"},
+    ],
 )
-def test_send_without_valid_credentials_saves_html_and_returns_false(mailer, monkeypatch, vals, capsys):
+def test_send_without_valid_credentials_saves_html_and_returns_false(
+    mailer, monkeypatch, vals, capsys
+):
     monkeypatch.setattr(sm, "_env", _Env(**vals))
     assert sm.send("S", "t", "<b>h</b>") is False
     assert (mailer / "brief_today.html").read_text() == "<b>h</b>"
@@ -89,7 +95,11 @@ def test_send_plain_alternative_message_and_recipients(mailer, monkeypatch, caps
     assert (s.host, s.port, s.login_args) == ("smtp.gmail.com", 465, ("me@example.com", "x" * 16))
     frm, to, msg = _parse(s)
     assert frm == "me@example.com" and to == ["a@x.com", "b@y.com"]
-    assert msg["Subject"] == "Brief" and msg["From"] == "me@example.com" and msg["To"] == "a@x.com, b@y.com"
+    assert (
+        msg["Subject"] == "Brief"
+        and msg["From"] == "me@example.com"
+        and msg["To"] == "a@x.com, b@y.com"
+    )
     assert msg.get_content_type() == "multipart/alternative"
     kinds = [p.get_content_type() for p in msg.get_payload()]
     assert kinds == ["text/plain", "text/html"]
@@ -105,8 +115,13 @@ def test_send_defaults_recipient_to_sender(mailer, monkeypatch):
 def test_send_inline_images_and_attachments_shape(mailer, monkeypatch, capsys):
     _creds(monkeypatch)
     png = b"\x89PNG\r\n\x1a\n" + b"0" * 20
-    sm.send("S", "t", "<img src='cid:chart1'>", attachments=[("full.html", "<h1>full</h1>")],
-            inline_images={"chart1": png})
+    sm.send(
+        "S",
+        "t",
+        "<img src='cid:chart1'>",
+        attachments=[("full.html", "<h1>full</h1>")],
+        inline_images={"chart1": png},
+    )
     msg = _parse(_SMTP.instances[0])[2]
     assert msg.get_content_type() == "multipart/mixed"
     core, att = msg.get_payload()
@@ -115,7 +130,10 @@ def test_send_inline_images_and_attachments_shape(mailer, monkeypatch, capsys):
     assert alt.get_content_type() == "multipart/alternative"
     assert img.get_content_type() == "image/png" and img["Content-ID"] == "<chart1>"
     assert 'filename="chart1.png"' in img["Content-Disposition"]
-    assert att.get_content_type() == "text/html" and 'filename="full.html"' in att["Content-Disposition"]
+    assert (
+        att.get_content_type() == "text/html"
+        and 'filename="full.html"' in att["Content-Disposition"]
+    )
     assert att.get_payload(decode=True).decode() == "<h1>full</h1>"
     assert "(+1 attachment)" in capsys.readouterr().out
 
@@ -176,18 +194,27 @@ class _Cur:
 
 def _fake_pg(monkeypatch, rows, connect=True):
     cur = _Cur(rows)
-    pg = types.SimpleNamespace(connect=lambda: connect,
-                               get_connection=lambda: types.SimpleNamespace(cursor=lambda: cur))
-    wm = types.SimpleNamespace(norm=lambda m: str(m).upper(),
-                               technical_markets=lambda tier: {2: ["EU", "JP"], 3: ["HK", "SG"]}[tier])
+    pg = types.SimpleNamespace(
+        connect=lambda: connect, get_connection=lambda: types.SimpleNamespace(cursor=lambda: cur)
+    )
+    wm = types.SimpleNamespace(
+        norm=lambda m: str(m).upper(),
+        technical_markets=lambda tier: {2: ["EU", "JP"], 3: ["HK", "SG"]}[tier],
+    )
     monkeypatch.setitem(sys.modules, "pg_client", pg)
     monkeypatch.setitem(sys.modules, "watchlist_markets", wm)
     return cur
 
 
 def test_technical_section_formats_tiers_and_skips_missing_markets(monkeypatch):
-    cur = _fake_pg(monkeypatch, [("eu", date(2026, 7, 30), 12, 300), ("JP", date(2026, 7, 31), 5, 100),
-                                 ("HK", date(2026, 7, 29), 3, 50)])
+    cur = _fake_pg(
+        monkeypatch,
+        [
+            ("eu", date(2026, 7, 30), 12, 300),
+            ("JP", date(2026, 7, 31), 5, 100),
+            ("HK", date(2026, 7, 29), 3, 50),
+        ],
+    )
     html = sm._technical_section()
     assert "Tier 2 — daily, technical only:</b> EU 12/300 (30 Jul) · JP 5/100 (31 Jul)" in html
     assert "Tier 3 — weekly, technical only:</b> HK 3/50 (29 Jul)" in html and "SG" not in html
@@ -214,13 +241,28 @@ def test_technical_section_is_failure_isolated(monkeypatch, capsys):
 def test_digest_section_failure_renders_error_strip(monkeypatch, capsys):
     monkeypatch.setitem(sys.modules, "watchlist_digest", None)
     html, subj, full, pngs = sm._digest_section()
-    assert "watchlist digest failed this morning" in html and subj == "" and full is None and pngs == {}
+    assert (
+        "watchlist digest failed this morning" in html
+        and subj == ""
+        and full is None
+        and pngs == {}
+    )
     assert "digest section failed (brief still sent)" in capsys.readouterr().out
 
 
-def _fake_digest_stack(monkeypatch, tmp_path, rows, changed=False, viz_boom=False, bundles=True,
-                       learned_boom=False, news_boom=False):
-    wl = pd.DataFrame({"symbol": ["A", "B", "C"], "market": ["IN", "US", "JP"], "status": ["watch"] * 3})
+def _fake_digest_stack(
+    monkeypatch,
+    tmp_path,
+    rows,
+    changed=False,
+    viz_boom=False,
+    bundles=True,
+    learned_boom=False,
+    news_boom=False,
+):
+    wl = pd.DataFrame(
+        {"symbol": ["A", "B", "C"], "market": ["IN", "US", "JP"], "status": ["watch"] * 3}
+    )
     wl.to_csv(tmp_path / "watchlist.csv", index=False)
     log = {}
 
@@ -237,12 +279,20 @@ def _fake_digest_stack(monkeypatch, tmp_path, rows, changed=False, viz_boom=Fals
             raise RuntimeError("model missing")
 
     W = types.SimpleNamespace(
-        __file__=str(tmp_path / "watchlist_digest.py"), maintain=maintain,
+        __file__=str(tmp_path / "watchlist_digest.py"),
+        maintain=maintain,
         build_rows=lambda w, frames_out: (frames_out.update({"k": 1}), rows)[1],
-        assign_sectors=lambda r: None, assign_recommendations=lambda r: None,
-        annotate_learned=annotate_learned, render=render, zone_series=object())
-    WM = types.SimpleNamespace(covered=lambda m: m != "JP", restrict=lambda df: df[df["market"] != "JP"],
-                               COVERED=["IN", "US"])
+        assign_sectors=lambda r: None,
+        assign_recommendations=lambda r: None,
+        annotate_learned=annotate_learned,
+        render=render,
+        zone_series=object(),
+    )
+    WM = types.SimpleNamespace(
+        covered=lambda m: m != "JP",
+        restrict=lambda df: df[df["market"] != "JP"],
+        COVERED=["IN", "US"],
+    )
     monkeypatch.setitem(sys.modules, "watchlist_digest", W)
     monkeypatch.setitem(sys.modules, "watchlist_markets", WM)
 
@@ -258,8 +308,10 @@ def _fake_digest_stack(monkeypatch, tmp_path, rows, changed=False, viz_boom=Fals
         return {"chart1": b"PNGDATA"}
 
     monkeypatch.setitem(sys.modules, "watchlist_viz", types.SimpleNamespace(build_all=build_all))
-    PB = types.SimpleNamespace(maybe_build=lambda a, f: {"built": "2026-07-01"},
-                               value=lambda s, a, f: [{"b": 1}, {"b": 2}] if bundles else [])
+    PB = types.SimpleNamespace(
+        maybe_build=lambda a, f: {"built": "2026-07-01"},
+        value=lambda s, a, f: [{"b": 1}, {"b": 2}] if bundles else [],
+    )
     monkeypatch.setitem(sys.modules, "portfolio_bundles", PB)
     return log
 
@@ -287,21 +339,37 @@ def test_digest_section_happy_path_counts_and_renders_twice(monkeypatch, tmp_pat
     assert log["maintain_in"] == ["A", "B"]  # JP is held back by the coverage gate
     out = capsys.readouterr().out
     assert "coverage gate held back 1 row(s) outside IN/US" in out
-    assert "evicted EVICT1" in out and "purged PURGE1" in out and "bundles: 2 model portfolios" in out
+    assert (
+        "evicted EVICT1" in out and "purged PURGE1" in out and "bundles: 2 model portfolios" in out
+    )
 
 
-def test_digest_section_writes_watchlist_back_only_when_changed_and_keeps_parked(monkeypatch, tmp_path):
+def test_digest_section_writes_watchlist_back_only_when_changed_and_keeps_parked(
+    monkeypatch, tmp_path
+):
     _fake_digest_stack(monkeypatch, tmp_path, _rows(), changed=False)
     sm._digest_section()
     assert pd.read_csv(tmp_path / "watchlist.csv")["symbol"].tolist() == ["A", "B", "C"]
     (tmp_path / "watchlist.csv").unlink()
     _fake_digest_stack(monkeypatch, tmp_path, _rows(), changed=True)
     sm._digest_section()
-    assert pd.read_csv(tmp_path / "watchlist.csv")["symbol"].tolist() == ["A", "B", "C"]  # JP row re-appended
+    assert pd.read_csv(tmp_path / "watchlist.csv")["symbol"].tolist() == [
+        "A",
+        "B",
+        "C",
+    ]  # JP row re-appended
 
 
 def test_digest_optional_blocks_are_failure_isolated(monkeypatch, tmp_path, capsys):
-    _fake_digest_stack(monkeypatch, tmp_path, _rows(), viz_boom=True, learned_boom=True, news_boom=True, bundles=False)
+    _fake_digest_stack(
+        monkeypatch,
+        tmp_path,
+        _rows(),
+        viz_boom=True,
+        learned_boom=True,
+        news_boom=True,
+        bundles=False,
+    )
     html, subj, full, pngs = sm._digest_section()
     assert html == "SHORT" and pngs == {} and subj.endswith("0 bundles)")
     out = capsys.readouterr().out
