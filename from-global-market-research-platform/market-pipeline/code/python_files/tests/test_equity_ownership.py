@@ -2,6 +2,7 @@
 
 import sys
 import types
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -359,7 +360,7 @@ def test_run_sip_parses_notes_and_writes_series(cache, monkeypatch, capsys):
     monkeypatch.setattr(EO.requests, "get", get)
 
     def run(cmd, capture_output, text, timeout):
-        marker = open(cmd[1], "rb").read().decode().split("%PDF-1.4 ")[1]
+        marker = Path(cmd[1]).read_bytes().decode().split("%PDF-1.4 ")[1]
         return types.SimpleNamespace(stdout=texts[marker])
 
     monkeypatch.setattr(subprocess, "run", run)
