@@ -327,3 +327,62 @@ def test_main_too_few_names_reports_instead_of_crashing(main_env, monkeypatch):
     monkeypatch.setattr(EB, "load_panel", lambda m: (px, tv))
     fake_yf(monkeypatch, boom=True)
     assert run_main(monkeypatch, "--top", "25") in (0, 1)
+
+
+# ── mutation follow-ups ───────────────────────────────────────────────────────
+def bench_cagr(md, label):
+    row = [x for x in md.splitlines() if x.startswith(f"| **{label} (the ETF")][0]
+    return float(row.split("|")[2].strip().strip("*").strip("%")) / 100
+
+
+@pytest.mark.parametrize("rebalance", ["ME", "QE"])
+def test_main_annualises_the_benchmark_by_the_rebalance_frequency(main_env, monkeypatch, rebalance):
+    px = main_env
+    bench = pd.Series(100 * np.cumprod(1 + np.full(len(px), 0.0003)), index=px.index)
+    fake_yf(monkeypatch, bench)
+    run_main(monkeypatch, "--top", "25", "--rebalance", rebalance, "--benchmark", "QQQ")
+    # 0.03%/day compounds to ~7.9%/yr whichever way the series is sampled
+    assert 0.07 < bench_cagr(EB.OUT_MD.read_text(), "QQQ") < 0.09
+
+
+def test_main_report_states_the_lookback(main_env, monkeypatch):
+    fake_yf(monkeypatch, boom=True)
+    run_main(monkeypatch, "--top", "25")
+    assert "- lookback     : 252d trailing, strictly before each rebalance" in EB.OUT_MD.read_text()
+    assert EB.LOOKBACK == 252
+
+
+def test_main_normalises_scheme_weights_that_do_not_sum_to_one(main_env, monkeypatch):
+    fake_yf(monkeypatch, boom=True)
+    monkeypatch.setitem(EB.SCHEMES, "double-equal", lambda R, mu, cov: np.full(R.shape[1], 2.0))
+    run_main(monkeypatch, "--top", "25")
+    rows = {
+        x.split("|")[1].strip(): x.split("|")[2].strip()
+        for x in EB.OUT_MD.read_text().splitlines()
+        if x.startswith("| ")
+    }
+    assert rows["double-equal"] == rows["1/N equal"]
+
+
+def test_main_benchmark_with_only_two_periods_is_not_ranked(monkeypatch, tmp_path):
+    n = 277  # two rebalances survive the 252d lookback
+    rng = np.random.default_rng(0)
+    idx = pd.bdate_range("2016-01-04", periods=n)
+    mkt = rng.normal(0.0004, 0.008, n)
+    cols = {
+        f"S{i:02d}": 100 * np.cumprod(1 + (0.5 + 0.05 * i) * mkt + rng.normal(0, 0.01, n))
+        for i in range(30)
+    }
+    px = pd.DataFrame(cols, index=idx)
+    tv = pd.DataFrame({c: 1e6 * (1 + k) for k, c in enumerate(px.columns)}, index=idx)
+    monkeypatch.setattr(EB, "load_panel", lambda m: (px, tv))
+    monkeypatch.setattr(EB, "OUT_MD", tmp_path / "etf.md")
+    monkeypatch.setitem(sys.modules, "sklearn", types.SimpleNamespace())
+    monkeypatch.setitem(
+        sys.modules, "sklearn.covariance", types.SimpleNamespace(LedoitWolf=FakeLedoitWolf)
+    )
+    fake_yf(monkeypatch, pd.Series(100 * np.cumprod(1 + np.full(n, 0.0003)), index=idx))
+    run_main(monkeypatch, "--top", "25")
+    md = EB.OUT_MD.read_text()
+    assert "- periods      : 2" in md
+    assert "(the ETF you'd just buy)" not in md and "n/a" in md

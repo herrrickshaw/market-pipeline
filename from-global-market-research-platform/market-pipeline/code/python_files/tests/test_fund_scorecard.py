@@ -407,3 +407,41 @@ def test_main_unrankable_funds_are_counted_not_ranked(main_env, monkeypatch):
     line = [x for x in FS.OUT_MD.read_text().splitlines() if x.startswith("| Large Cap Fund")][0]
     cells = [c.strip() for c in line.strip("|").split("|")]
     assert cells[1] == "3" and cells[2] == "1"
+
+
+# ── mutation follow-ups ───────────────────────────────────────────────────────
+def test_main_window_runs_from_first_to_last_book_month(main_env, monkeypatch):
+    ev = write_events(main_env)
+    months = pd.period_range("2024-01", "2024-08", freq="M")
+    install_duckdb(monkeypatch, FakeDuck(peer_navs(months, [0.0, 0.0, 0.0])))
+    run_main(monkeypatch, "--events", str(ev), "--min-peers", "3")
+    md = FS.OUT_MD.read_text()
+    line = [x for x in md.splitlines() if x.startswith("- window")][0]
+    # first trade 2024-01-10, last 2024-02-10 + 30d: the book spans Jan..Mar
+    assert "**2024-01-01 → 2024-03-31**" in line
+
+
+def test_main_rank_if_fully_invested_does_not_count_ties_as_losses(main_env, monkeypatch):
+    ev = write_events(main_env)
+    months = pd.period_range("2024-01", "2024-08", freq="M")
+    install_duckdb(monkeypatch, FakeDuck(peer_navs(months, [0.0, 0.0, 0.0])))
+    captured = {}
+    real_daily, real_perf = FS.book_daily, FS.perf
+
+    def book_daily(events, cost_bps):
+        captured["daily"] = real_daily(events, cost_bps)
+        return captured["daily"]
+
+    def tied_perf(series):
+        if series.name == "nav":  # the book itself
+            return real_perf(series)
+        d = captured["daily"]
+        inv = d[d.n_positions > 0].ret
+        return {"cagr": ((1 + inv).prod() ** (365.25 / len(inv)) - 1)}
+
+    monkeypatch.setattr(FS, "book_daily", book_daily)
+    monkeypatch.setattr(FS, "perf", tied_perf)
+    run_main(monkeypatch, "--events", str(ev), "--min-peers", "3")
+    line = [x for x in FS.OUT_MD.read_text().splitlines() if x.startswith("| Large Cap Fund")][0]
+    cells = [c.strip() for c in line.strip("|").split("|")]
+    assert cells[1] == "3" and cells[7] == "1/4"  # equal to the invested-only CAGR is not a loss

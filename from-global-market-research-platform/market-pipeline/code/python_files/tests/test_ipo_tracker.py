@@ -711,3 +711,37 @@ def test_main_summary_survives_a_failed_enrichment_in_a_small_batch(IT, monkeypa
 
     monkeypatch.setattr(IT, "enrich_ipo", enrich)
     IT.main(lookback_days=30, workers=1, append_to_scan=False)
+
+
+# ── mutation follow-ups: progress output, pacing, index-free sheets ───────────
+def test_download_progress_lines_and_pacing(IT, monkeypatch, tmp_path, capsys):
+    install_cache(monkeypatch, tmp_path)
+    waits = []
+    monkeypatch.setattr(IT.time, "sleep", lambda s: waits.append(s))
+    monkeypatch.setattr(
+        IT.yf,
+        "download",
+        lambda b, **k: ohlc(30) if len(b) == 1 else multi_download(b),
+    )
+    IT.download_ipo_ohlc([f"S{i:03d}" for i in range(101)], verbose=True)
+    out = capsys.readouterr().out
+    assert "Batch 1/3 (50 tickers)" in out and "Batch 2/3 (50 tickers)" in out
+    assert "Batch 3/3 (1 tickers)" in out
+    assert out.count("OK (50/50)") == 2 and "OK (1/1)" in out
+    assert waits == [IT.SLEEP_BETWEEN, IT.SLEEP_BETWEEN] and IT.SLEEP_BETWEEN == 2.0
+
+
+def test_excel_sheets_have_no_index_column(IT):
+    path = IT.save_ipo_excel(meta_rows(), [{"Symbol": "AAA"}], 60)
+    for name, df in pd.read_excel(path, sheet_name=None).items():
+        assert not [c for c in df.columns if str(c).startswith("Unnamed")], name
+    empty = IT.save_ipo_excel([], [], 60)
+    for name, df in pd.read_excel(empty, sheet_name=None).items():
+        assert not [c for c in df.columns if str(c).startswith("Unnamed")], name
+
+
+def test_main_progress_every_25(IT, monkeypatch, capsys):
+    wire_main(IT, monkeypatch, [f"S{i:02d}" for i in range(26)])
+    IT.main(lookback_days=60, workers=2, append_to_scan=False)
+    out = capsys.readouterr().out
+    assert "25/26 processed" in out and "26/26 processed" in out

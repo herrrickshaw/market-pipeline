@@ -696,3 +696,62 @@ def test_run_sources_and_main_dispatch(india_env, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["x", "--sources", "--us"])
     EO.main()
     assert calls == ["run_sources"]
+
+
+# ── mutation follow-ups ───────────────────────────────────────────────────────
+def test_run_sip_requests_time_out_after_thirty_seconds(cache, monkeypatch):
+    seen = []
+
+    def get(url, headers, timeout):
+        seen.append(timeout)
+        return types.SimpleNamespace(status_code=404, content=b"")
+
+    monkeypatch.setattr(EO.requests, "get", get)
+    EO.run_sip(start_year=2026)
+    assert seen and set(seen) == {30}
+
+
+def test_india_ownership_progress_is_counted_from_one(india_env, monkeypatch, capsys):
+    syms = [f"S{i:02d}" for i in range(34)]
+    install_kit(monkeypatch, syms)
+
+    def company(sym):
+        print(f"CALL {sym}")
+        return screener_table(40, 10, 20, 1, 29, ("Mar 2024",)), 1000.0
+
+    monkeypatch.setattr(EO, "_screener_company", company)
+    EO.run_india_ownership(limit=100, sleep=0)
+    out = capsys.readouterr().out
+    assert "CALL S14\n    15/34 …\n" in out and "CALL S29\n    30/34 …\n" in out
+
+
+def test_run_table_india_table_has_one_separator_per_column_and_last_nine_quarters(india_env):
+    seed_report_inputs(india_env)
+    q = pd.period_range("2022Q1", periods=12, freq="Q")
+    labels = [f"{['Mar', 'Jun', 'Sep', 'Dec'][p.quarter - 1]} {p.year}" for p in q]
+    pd.DataFrame(
+        {
+            "quarter": labels,
+            "n_companies": [40] * 12,
+            "Promoters": 50.0,
+            "FIIs": np.linspace(20, 15, 12),
+            "DIIs": np.linspace(14, 19, 12),
+            "Government": 1.0,
+            "Public": 15.0,
+        }
+    ).to_parquet(EO.IN_OWN, index=False)
+    EO.run_table()
+    md = EO.REPORT.read_text()
+    assert "| quarter | n | Promoters | FIIs | DIIs | Government | Public |" in md
+    assert "|---|---|---|---|---|---|---|" in md  # 5 holder columns + quarter + n
+    assert not any(f"| {q} |" in md for q in ("Mar 2022", "Jun 2022", "Sep 2022"))
+    assert "| Dec 2022 | 40 |" in md and "| Dec 2024 | 40 |" in md
+    assert "CHANGING company panel, not only ownership shifting" in md
+
+
+def test_run_table_creates_missing_report_directories(india_env, monkeypatch):
+    nested = india_env / "deep" / "er" / "reports"
+    monkeypatch.setattr(EO, "REPORTS", nested)
+    monkeypatch.setattr(EO, "REPORT", nested / "table.md")
+    EO.run_table()
+    assert (nested / "table.md").exists()

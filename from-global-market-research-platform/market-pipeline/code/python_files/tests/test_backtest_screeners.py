@@ -732,3 +732,85 @@ def test_us_symbols_sec_fallback(BS, monkeypatch):
     assert BS.get_us_symbols() == [("AAPL", ""), ("IBM", "")]
     monkeypatch.setattr(requests, "get", lambda *a, **k: 1 / 0)
     assert BS.get_us_symbols() == []
+
+
+# ── mutation follow-ups ───────────────────────────────────────────────────────
+def test_index_returns_horizon_landing_exactly_past_the_end_is_nan_only_for_that_horizon(BS):
+    idx = index_frame(n=30, close=100.0 + np.arange(30.0))
+    out = BS.compute_index_returns(idx, idx.index[9])  # 9 + 21 == 30 == len(index)
+    assert out["T+1d"] == pytest.approx(1.0 / 109.0 * 100)
+    assert np.isnan(out["T+1mo"]) and np.isnan(out["T+3mo"])
+    last_ok = BS.compute_index_returns(idx, idx.index[8])  # 8 + 21 == 29, the last bar
+    assert last_ok["T+1mo"] == pytest.approx(21.0 / 108.0 * 100)
+
+
+def test_us_symbols_sec_fallback_skips_short_rows(BS, monkeypatch):
+    import requests
+
+    class R:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": [[1, "x"], [2, "y", "msft"], [3, "z", "amd"], [4, "w", "ko", "NYSE"]]}
+
+    def get(url, **k):
+        if "sec.gov" in url:
+            return R()
+        raise OSError("ftp down")
+
+    monkeypatch.setattr(requests, "get", get)
+    # rows without an exchange column never qualify, and a 2-item row must not abort the loop
+    assert BS.get_us_symbols() == [("KO", "")]
+
+
+def test_piotroski_current_ratio_point_decides_a_seven_point_company(BS, monkeypatch):
+    inc, bal, cf = piotroski_frames()
+    inc = stmt({"Net Income": [120, 100], "Total Revenue": [1000, 900], "Gross Profit": [400, 400]})
+    bal = stmt(
+        {
+            "Total Assets": [1000, 1000],
+            "Long Term Debt": [100, 200],
+            "Current Assets": [500, 400],
+            "Current Liabilities": [300, 300],
+            "Share Issued": [11, 10],  # dilution costs a point; flat gross margin costs another
+        }
+    )
+    use_ticker(BS, monkeypatch, inc=inc, bal=bal, cf=cf, info={"sector": "Technology"})
+    assert BS.fetch_fundamental_signal("TCS", ".NS", "piotroski", ohlc100()) is not None
+    weaker = bal.copy()
+    weaker.loc["Current Assets", weaker.columns[0]] = 300  # current ratio no longer improving
+    use_ticker(BS, monkeypatch, inc=inc, bal=weaker, cf=cf, info={"sector": "Technology"})
+    assert BS.fetch_fundamental_signal("TCS", ".NS", "piotroski", ohlc100()) is None
+
+
+def test_bull_cartel_compares_latest_quarter_with_the_year_ago_quarter(BS, monkeypatch):
+    q = stmt(
+        {
+            "Total Revenue": [
+                1200e7,
+                1000e7,
+                1000e7,
+                1000e7,
+                1000e7,
+            ],  # only the latest quarter grew
+            "Net Income": [30e7, 25e7, 22e7, 21e7, 20e7],
+        },
+        ncols=5,
+    )
+    use_ticker(BS, monkeypatch, inc=stmt({"Net Income": [1, 1]}), inc_q=q)
+    assert BS.fetch_fundamental_signal("X", ".NS", "bull_cartel", ohlc100()) is not None
+
+
+def test_signal_dated_before_the_first_bar_enters_on_the_first_bar(BS, monkeypatch):
+    inc, bal, cf = piotroski_frames()
+    use_ticker(BS, monkeypatch, inc=inc, bal=bal, cf=cf, info={"sector": "Technology"})
+    late = ohlc100()
+    late.index = late.index + pd.Timedelta(days=2000)  # first bar is years after the report date
+    sig = BS.fetch_fundamental_signal("TCS", ".NS", "piotroski", late)
+    assert sig is not None and sig["signal_idx"] == 0
+    assert sig["entry_price"] == pytest.approx(late.Close.iloc[0])
+
+
+def test_worker_pool_default_is_eight(BS):
+    assert BS.MAX_WORKERS == 8

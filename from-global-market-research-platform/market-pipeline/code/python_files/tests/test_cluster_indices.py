@@ -221,3 +221,18 @@ def test_main_reports_when_no_formation_qualifies(study, monkeypatch):
     px, ind = study
     monkeypatch.setattr(CI, "sectors", lambda: ind.iloc[:50])
     assert run_main(monkeypatch, "--k", "4", "--hold", "60") in (0, 1)
+
+
+def test_main_subperiod_row_appears_at_exactly_four_formations(tmp_path, monkeypatch):
+    px, tv, ind = factor_panel(n_days=1360)  # puts exactly 4 formations in 2021-2026
+    monkeypatch.setitem(
+        sys.modules,
+        "pead_liquidity_study",
+        types.SimpleNamespace(load_prices=lambda: (px, tv), contaminated=lambda p: []),
+    )
+    monkeypatch.setattr(CI, "sectors", lambda: ind)
+    monkeypatch.setattr(CI, "OUT_MD", tmp_path / "ci.md")
+    monkeypatch.setattr(CI, "UNIV", 200)
+    run_main(monkeypatch, "--k", "4", "--hold", "60")
+    md = CI.OUT_MD.read_text()
+    assert "| 2021-2026 | 4 |" in md and "| 2017-2020 | 13 |" in md

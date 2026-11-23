@@ -622,3 +622,63 @@ def test_forward_windows_crossing_a_split_are_excluded_not_winsorised(monkeypatc
     assert np.isnan(out["ret_T+3d"].iloc[0])  # window [0, 3] crosses the split
     assert np.isnan(out["ret_T+3d"].iloc[1])  # runs past the end of data
     assert "excluded 1 signal-horizon windows" in capsys.readouterr().out
+
+
+# ── mutation follow-ups ───────────────────────────────────────────────────────
+def test_new_high_needs_at_least_260_bars():
+    def build(n):
+        closes = np.full(n, 90.0)
+        closes[255] = 100.0
+        p = panel({"A": closes})
+        p["High"] = 100.0
+        return FS.new_high_signals(p)
+
+    assert list(build(260)["symbol"]) == ["A"]
+    assert build(259).empty
+
+
+def test_ratio_columns_roce_ex_cash_and_dupont_leverage():
+    out = FS.compute_fundamental_screens(fund_frame()).set_index("fy_end")
+    r = out.loc["2018-12-31"]  # k = 2: cash 120, assets 1200, current liabilities 210
+    assert r["capital_employed_ex_cash"] == pytest.approx(1200 - 210 - 120)
+    assert r["roce_ex_cash"] == pytest.approx(160 / 870)
+    assert r["financial_leverage_dupont"] == pytest.approx(((1200 + 1100) / 2) / ((600 + 550) / 2))
+
+
+def test_margin_and_asset_growth_pass_flags_are_strict_at_the_threshold():
+    df = fund_frame()
+    # row 3: net margin exactly 10%, operating margin exactly 15%
+    df.loc[3, ["revenue", "net_income", "ebit"]] = [1000.0, 100.0, 150.0]
+    # row 4: assets fall exactly 50% from row 3
+    df.loc[3, "total_assets"] = 1000.0
+    df.loc[4, "total_assets"] = 500.0
+    out = FS.compute_fundamental_screens(df).set_index("fy_end")
+    assert out.loc["2019-12-31", "net_margin_pass"] == 0
+    assert out.loc["2019-12-31", "operating_margin_pass"] == 0
+    assert out.loc["2020-12-31", "asset_growth"] == pytest.approx(-0.5)
+    assert out.loc["2020-12-31", "low_asset_growth_pass"] == 0
+
+
+def test_bvps_n_years_back_columns():
+    out = FS.compute_fundamental_screens(fund_frame())
+    for n in (3, 5, 10):
+        assert f"bvps_{n}y_back" in out.columns
+    r = out.set_index("fy_end")
+    assert r.loc["2020-12-31", "bvps_3y_back"] == pytest.approx(r.loc["2017-12-31", "bvps"])
+    assert r.loc["2021-12-31", "bvps_5y_back"] == pytest.approx(r.loc["2016-12-31", "bvps"])
+
+
+def test_insider_buying_keeps_cheap_but_real_prices(tmp_path):
+    rows = [
+        {
+            "symbol": "CHEAP",
+            "FILING_DATE": pd.Timestamp(d),
+            "TRANS_CODE": "P",
+            "TRANS_SHARES": 100,
+            "TRANS_PRICEPERSHARE": 0.5,
+        }
+        for d in ("2020-01-10", "2020-01-20")
+    ]
+    p = tmp_path / "ins.parquet"
+    pd.DataFrame(rows).to_parquet(p, index=False)
+    assert list(FS.insider_buying_signals(str(p))["symbol"]) == ["CHEAP"]

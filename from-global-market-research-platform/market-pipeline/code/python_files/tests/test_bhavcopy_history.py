@@ -397,7 +397,7 @@ def test_fetch_history_seeds_assembled_from_cleaned_and_syncs_a_lagging_store(
     ]
     pd.DataFrame(rows).to_parquet(BH.CLEANED, index=False)
     install_nse(monkeypatch, env, {})
-    built = []
+    built, verbosity = [], []
     old = closes_ending(pd.Timestamp(days[0]) - pd.Timedelta(days=10))
     monkeypatch.setitem(
         sys.modules,
@@ -405,7 +405,11 @@ def test_fetch_history_seeds_assembled_from_cleaned_and_syncs_a_lagging_store(
         types.SimpleNamespace(
             symbols=lambda: ["AAA"],
             get=lambda s: old,
-            build=lambda hist, verbose=True: built.append(sorted(hist)) or len(hist),
+            build=lambda hist, verbose=True: (
+                built.append(sorted(hist)),
+                verbosity.append(verbose),
+                len(hist),
+            )[2],
         ),
     )
     out = BH.fetch_history(n_days=8, exchanges=("NSE",), min_bars=1, verbose=True)
@@ -413,6 +417,7 @@ def test_fetch_history_seeds_assembled_from_cleaned_and_syncs_a_lagging_store(
     assert pd.read_parquet(BH.ASSEMBLED)["_exch"].eq("NSE").all()
     text = capsys.readouterr().out
     assert "seeded assembled cache" in text and built == [["AAA"]] and "LMDB was behind" in text
+    assert verbosity == [False]  # the sync is quiet; fetch_history reports it itself
 
 
 def test_fetch_history_nse_precedence_and_bse_only_dates(env, monkeypatch):
@@ -488,3 +493,21 @@ def test_get_symbol_from_the_assembled_cache(env):
     assert list(g["Close"]) == [4.0, 6.0]  # old bar cut, NSE wins the tie
     assert BH.get_symbol("NOPE") is None
     assert len(BH.get_symbol("AAA", n_days=1000)) == 3
+
+
+def test_fetch_history_reports_new_trading_days_per_exchange(env, monkeypatch, capsys):
+    days = weekdays(4)
+    install_nse(
+        monkeypatch, env, {days[-1]: bhav_csv([("AAA", "INE000000001", 10, 10, 10, 10, 1)])}
+    )
+    no_store(monkeypatch)
+
+    def bse(day, sess):
+        if day in (days[-1], days[-2]):
+            return bhav_csv([("AAA", "INE000000001", 7, 7, 7, 7, 1)])
+        return None
+
+    monkeypatch.setattr(BH, "_bse_day", bse)
+    BH.fetch_history(n_days=4, exchanges=("NSE", "BSE"), min_bars=1, verbose=True)
+    text = capsys.readouterr().out
+    assert "NSE: +1 new trading days" in text and "BSE: +2 new trading days" in text

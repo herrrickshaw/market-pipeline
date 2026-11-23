@@ -537,3 +537,17 @@ def test_main_json_output_strips_log_lines(env, fake_langgraph, monkeypatch, cap
     assert data["runs"] and all("lines" not in r for r in data["runs"])
     assert not (env / "reports").exists()  # JSON mode writes nothing
     assert data["summary"].endswith("blocker(s)")
+
+
+# ── mutation follow-ups ───────────────────────────────────────────────────────
+def test_synthesize_ignores_basebrief_lines_that_are_not_the_smtp_warning():
+    runs = [{"job": "basebrief", "label": "b", "lines": ["email: configured, sent 1"]}]
+    assert titles(AG.synthesize(state(runs=runs))) == []
+
+
+def test_main_works_when_reports_dir_already_exists(env, fake_langgraph, monkeypatch, capsys):
+    write_logs(env)
+    (env / "reports").mkdir(exist_ok=True)
+    monkeypatch.setattr(sys, "argv", ["x", "--date", TAG])
+    assert AG.main() == 0
+    assert (env / "reports" / "activity_graph.md").exists()

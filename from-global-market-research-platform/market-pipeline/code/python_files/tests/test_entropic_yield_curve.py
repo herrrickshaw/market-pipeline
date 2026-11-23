@@ -625,3 +625,26 @@ def test_fetch_deduplicates_dates_keeping_the_first(lab, monkeypatch):
     )
     EYC.fetch()
     assert len(pd.read_parquet(EYC.YIELDS)) == 2  # same two dates from both years
+
+
+# ── mutation follow-ups ───────────────────────────────────────────────────────
+def test_fetch_treats_a_non_empty_file_without_a_date_column_as_empty(lab, monkeypatch, capsys):
+    import requests
+
+    monkeypatch.setattr(EYC, "START_YEAR", 2020)
+    monkeypatch.setattr(EYC, "END_YEAR", 2021)
+
+    def get(url, timeout):
+        return FakeResp("Foo,Bar\n1,2\n" if "/2021/" in url else treasury_csv(2020))
+
+    monkeypatch.setattr(requests, "get", get)
+    raw = pd.DataFrame({"Close": [1.0]}, index=pd.DatetimeIndex(["2020-01-02"], name="Date"))
+    monkeypatch.setitem(
+        sys.modules, "yfinance", types.SimpleNamespace(download=lambda *a, **k: raw)
+    )
+    assert EYC.fetch() == 0
+    assert "2021: empty" in capsys.readouterr().out
+
+
+def test_fetch_window_ends_in_2026():
+    assert EYC.END_YEAR == 2026

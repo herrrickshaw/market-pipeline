@@ -1,7 +1,6 @@
 """build_business_valuation_report.py -- P&L partitioning and the workbook it writes
 (sheet inventory, assumption cells, DCF formulas wired to the tax sheet)."""
 
-
 import pandas as pd
 import pytest
 from openpyxl import Workbook, load_workbook
@@ -255,3 +254,15 @@ def test_build_writes_a_readable_workbook(env, capsys):
 def test_output_filename_embeds_the_date():
     assert BV.OUT.name.startswith("strategy_earnings_and_valuation_")
     assert BV.OUT.suffix == ".xlsx" and BV.OUT.parent.name == "business_valuation"
+
+
+def test_capacity_warning_sits_one_blank_row_below_the_ceiling_table(env):
+    ws = BV.sheet_capacity(Workbook())
+    eu = next(c.row for row in ws.iter_rows() for c in row if c.value == "EU")
+    note = next(
+        c.row
+        for row in ws.iter_rows()
+        for c in row
+        if isinstance(c.value, str) and c.value.startswith("This is the hard constraint")
+    )
+    assert note - eu == 2

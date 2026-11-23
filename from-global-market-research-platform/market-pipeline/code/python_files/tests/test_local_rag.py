@@ -456,3 +456,33 @@ def test_main_modes(env, monkeypatch, capsys):
     LR.main()
     assert ran[0][0][1].endswith("trading_financials.py") and ran[0][1] == env
     assert "refreshing financial statements" in capsys.readouterr().out
+
+
+# ── mutation follow-ups: row caps and context depth ───────────────────────────
+def big_valuation_df(n=20):
+    return pd.DataFrame(
+        {
+            "market": ["india"] * n,
+            "name": [f"co{i:02d}" for i in range(n)],
+            "pe": [10.0] * n,
+            "pb": [1.0] * n,
+            "roe": [0.1] * n,
+            "valuation_z": [float(i - 10) for i in range(n)],
+            "verdict": ["x"] * n,
+        }
+    )
+
+
+@pytest.mark.parametrize("q", ["underpriced", "expensive", "valuation"])
+def test_valuation_lists_at_most_fifteen_rows(env, q):
+    rep(env, "valuation_clusters.csv", df=big_valuation_df())
+    table = LR.valuation(q).split("\n\n")[1].split("\n")
+    assert len(table) == 1 + 15  # header + 15 rows
+
+
+def test_answer_structured_context_uses_two_chunks(env, monkeypatch):
+    ks = []
+    monkeypatch.setattr(LR, "retrieve", lambda q, k: ks.append(k) or [])
+    rep(env, "income_statement_by_geo.csv", df=pd.DataFrame({"g": ["IN"]}))
+    LR.answer("income statement")
+    assert ks == [2]
