@@ -635,9 +635,9 @@ def _main(monkeypatch, *args):
 
 
 def test_main_demo_mode_without_providers(monkeypatch, capsys):
-    _pipeline_patch = lambda: types.SimpleNamespace(
-        active=[], status=lambda: "No providers active."
-    )  # noqa: E731
+    def _pipeline_patch():
+        return types.SimpleNamespace(active=[], status=lambda: "No providers active.")  # noqa: E731
+
     monkeypatch.setattr(sp, "SentimentPipeline", _pipeline_patch)
     _main(monkeypatch, "--tickers", "TCS")
     out = capsys.readouterr().out

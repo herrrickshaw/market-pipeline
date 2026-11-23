@@ -173,7 +173,14 @@ def test_build_feature_matrix_drops_unusable_and_keeps_columns(capsys):
 
 # ---------------------------------------------------------------- name_archetype
 def _prof(**kw):
-    base = dict(ret_12m=0, vol_60d=30, dma200_gap=0, max_drawdown=-10, rsi_14=50, mean_reversion=0)
+    base = {
+        "ret_12m": 0,
+        "vol_60d": 30,
+        "dma200_gap": 0,
+        "max_drawdown": -10,
+        "rsi_14": 50,
+        "mean_reversion": 0,
+    }
     base.update(kw)
     return pd.Series(base)
 
@@ -181,25 +188,25 @@ def _prof(**kw):
 @pytest.mark.parametrize(
     "kw,label",
     [
-        (dict(ret_12m=41, dma200_gap=11), "High-Momentum"),
-        (dict(ret_12m=40, dma200_gap=11), "Balanced"),  # strict >
-        (dict(ret_12m=41, dma200_gap=10), "Balanced"),
-        (dict(ret_12m=-21, dma200_gap=-11), "Sustained Downtrenders"),
-        (dict(ret_12m=-20, dma200_gap=-11), "Balanced"),
-        (dict(vol_60d=51), "High-Volatility"),
-        (dict(vol_60d=50), "Balanced"),
-        (dict(vol_60d=24, dma200_gap=4.9), "Low-Vol Range-Bound"),
-        (dict(vol_60d=25, dma200_gap=4.9), "Balanced"),
-        (dict(vol_60d=24, dma200_gap=-4.9), "Low-Vol Range-Bound"),
-        (dict(vol_60d=24, dma200_gap=5), "Balanced"),
-        (dict(mean_reversion=10.1), "Mean-Reverters"),
-        (dict(mean_reversion=10), "Balanced"),
-        (dict(rsi_14=66, ret_12m=16), "Overbought Momentum"),
-        (dict(rsi_14=65, ret_12m=16), "Balanced"),
-        (dict(rsi_14=66, ret_12m=15), "Balanced"),
-        (dict(max_drawdown=-51), "Deep-Drawdown Recovery"),
-        (dict(max_drawdown=-50), "Balanced"),
-        (dict(), "Balanced"),
+        ({"ret_12m": 41, "dma200_gap": 11}, "High-Momentum"),
+        ({"ret_12m": 40, "dma200_gap": 11}, "Balanced"),  # strict >
+        ({"ret_12m": 41, "dma200_gap": 10}, "Balanced"),
+        ({"ret_12m": -21, "dma200_gap": -11}, "Sustained Downtrenders"),
+        ({"ret_12m": -20, "dma200_gap": -11}, "Balanced"),
+        ({"vol_60d": 51}, "High-Volatility"),
+        ({"vol_60d": 50}, "Balanced"),
+        ({"vol_60d": 24, "dma200_gap": 4.9}, "Low-Vol Range-Bound"),
+        ({"vol_60d": 25, "dma200_gap": 4.9}, "Balanced"),
+        ({"vol_60d": 24, "dma200_gap": -4.9}, "Low-Vol Range-Bound"),
+        ({"vol_60d": 24, "dma200_gap": 5}, "Balanced"),
+        ({"mean_reversion": 10.1}, "Mean-Reverters"),
+        ({"mean_reversion": 10}, "Balanced"),
+        ({"rsi_14": 66, "ret_12m": 16}, "Overbought Momentum"),
+        ({"rsi_14": 65, "ret_12m": 16}, "Balanced"),
+        ({"rsi_14": 66, "ret_12m": 15}, "Balanced"),
+        ({"max_drawdown": -51}, "Deep-Drawdown Recovery"),
+        ({"max_drawdown": -50}, "Balanced"),
+        ({}, "Balanced"),
     ],
 )
 def test_name_archetype(kw, label):

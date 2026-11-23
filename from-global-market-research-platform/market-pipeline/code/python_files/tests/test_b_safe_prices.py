@@ -1,5 +1,6 @@
 """Offline tests for safe_prices (Money, Bar, PriceSeries, median_age_days)."""
 
+import dataclasses
 from datetime import date, datetime
 
 import numpy as np
@@ -35,7 +36,7 @@ def test_money_zero_and_negative_are_allowed_amounts():
 
 def test_money_is_frozen():
     m = sp.Money(1.0, "USD")
-    with pytest.raises(Exception):  # FrozenInstanceError
+    with pytest.raises(dataclasses.FrozenInstanceError):
         m.amount = 2.0
 
 
@@ -123,7 +124,7 @@ def test_bar_age_days_against_explicit_and_default_asof():
 def test_bar_repr_and_frozen():
     b = sp.Bar(date(2024, 1, 1), 1234.567)
     assert repr(b) == "Bar(2024-01-01 1,234.57)"
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         b.close = 1.0
 
 

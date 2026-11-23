@@ -277,7 +277,7 @@ def _store_with(members, formed, mkt="IN", name="B"):
 def _members(syms, px_form, weights, mkt="IN"):
     return [
         {"symbol": s, "market": mkt, "weight": w, "px_formation": px_form}
-        for s, w in zip(syms, weights)
+        for s, w in zip(syms, weights, strict=False)
     ]
 
 
@@ -298,7 +298,7 @@ def test_value_weighted_returns_drift_and_alpha():
     cur = [0.4 * 1.2, 0.3 * 0.8, 0.2 * 1.1, 0.1 * 1.1]
     tot = sum(cur)
     assert v["drift"] == pytest.approx(
-        max(abs(c / tot - w) for c, w in zip(cur, [0.4, 0.3, 0.2, 0.1])) * 100
+        max(abs(c / tot - w) for c, w in zip(cur, [0.4, 0.3, 0.2, 0.1], strict=False)) * 100
     )
     assert v["sell_now"] == 0 and len(v["members"]) == 4
 

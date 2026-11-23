@@ -72,7 +72,7 @@ def _yf(monkeypatch, *responses):
 
 def _multi(frames):
     """{ticker: ohlc} -> yfinance-style MultiIndex (field, ticker) frame."""
-    return pd.concat({t: f for t, f in frames.items()}, axis=1).swaplevel(axis=1).sort_index(axis=1)
+    return pd.concat(dict(frames.items()), axis=1).swaplevel(axis=1).sort_index(axis=1)
 
 
 # ---------------------------------------------------------------- meta
@@ -362,7 +362,7 @@ def test_bulk_download_batches_and_sleeps_between(cache, monkeypatch, capsys):
 
 
 def test_bulk_download_missing_ticker_and_flat_frame_and_empty(cache, monkeypatch, capsys):
-    f = _yf(monkeypatch, _multi({"A": _ohlc(n=5)}))
+    _yf(monkeypatch, _multi({"A": _ohlc(n=5)}))
     out = cache._bulk_yf_download(["A", "ZZ"], date(2024, 1, 1))
     assert list(out) == ["A"] and "OK (1/2)" in capsys.readouterr().out
     _yf(monkeypatch, _ohlc(n=5))  # flat frame -> assigned to the first ticker of the batch
