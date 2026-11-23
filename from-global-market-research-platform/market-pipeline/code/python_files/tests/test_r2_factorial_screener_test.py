@@ -7,6 +7,12 @@ import pytest
 import factorial_screener_test as fst
 
 
+@pytest.fixture(autouse=True)
+def _us_benchmark(monkeypatch):
+    # the India/CN/JP variants rebind this module-level global at import; pin the US value for these tests
+    monkeypatch.setattr(fst, "BENCHMARK_SYMBOL", "SPY")
+
+
 def _px(sym, closes, start="2020-01-01", high=None, low=None, vol=1000.0):
     n = len(closes)
     d = pd.bdate_range(start, periods=n)
