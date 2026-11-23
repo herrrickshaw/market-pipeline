@@ -416,3 +416,12 @@ def test_main_flow_guards(monkeypatch, capsys):
     monkeypatch.setattr(pdx, "_SK_OK", False)
     pdx.main("ALL")
     assert "pip install scikit-learn" in capsys.readouterr().out
+
+
+def test_extract_features_volatility_features_match_definition():
+    df = _ohlcv(seed=4)
+    f = pdx.extract_features("V", df)
+    r = df["Close"].iloc[: -pdx.FWD].pct_change().dropna()
+    assert f["vol_20d"] == pytest.approx(r.tail(20).std() * np.sqrt(252) * 100)
+    assert f["vol_60d"] == pytest.approx(r.tail(60).std() * np.sqrt(252) * 100)
+    assert f["vol_ratio"] == pytest.approx(f["vol_20d"] / f["vol_60d"])
