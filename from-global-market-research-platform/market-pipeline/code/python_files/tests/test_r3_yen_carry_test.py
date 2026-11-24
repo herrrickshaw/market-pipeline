@@ -495,7 +495,6 @@ def test_fetch_fred_series_with_publication_lag(yc, monkeypatch, capsys):
         if "IR3TIB01JPM156N" in url:
             return _FakeResp({"observations": [{"date": "2024-01-01", "value": "0.1"},
                                                {"date": "2024-02-01", "value": "."}]})
-        sid = url.split("series_id=")[1].split("&")[0]
         return _FakeResp({"observations": [{"date": "2024-01-01", "value": "5"}, {"date": "2024-01-08", "value": "6"}]})
 
     import requests

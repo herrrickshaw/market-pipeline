@@ -2,7 +2,6 @@
 
 import importlib
 import json
-import operator
 import sys
 import types
 from datetime import date, datetime, timedelta
