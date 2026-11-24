@@ -136,6 +136,8 @@ def test_turnover_floor_checks(ca, tmp_path):
     r = _audit(ca, tmp_path, rows=10, turnover=[floor * 10] * 8 + [floor - 1, floor])
     assert r["below_floor"] == 1  # a turnover exactly at the floor is not below it
     assert r["issues"] == [("WARN", f"1 rows below the {floor:,.0f} USD floor")]
+    r = _audit(ca, tmp_path, rows=10, turnover=[1.0] * 9 + [floor * 10])  # one row short of "every row": still a warning
+    assert r["issues"] == [("WARN", f"9 rows below the {floor:,.0f} USD floor")]
     r = _audit(ca, tmp_path, rows=3, turnover=[1.0, 2.0, 3.0])
     assert r["issues"] == [("ERROR", "every row below the liquidity floor — gate not applied")]
     r = _audit(ca, tmp_path, rows=5, turnover_col="Other")

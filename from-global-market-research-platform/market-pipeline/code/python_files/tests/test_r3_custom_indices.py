@@ -466,3 +466,16 @@ def test_build_global_trims_history_to_2016_exactly(ci, monkeypatch):
     out = ci.build_global(COST)
     kept = pd.DatetimeIndex(sorted({d for d in idx if d.year >= 2016}))
     assert out["NUCLEAR"][0][0] == kept[ci.WARMUP + 1]  # warm-up is counted from the first 2016 bar
+
+
+def test_build_peers_admits_pairs_seen_in_three_formations(ci, monkeypatch):
+    # the first group only enters the universe at the 2nd formation, so its pairs are co-seen 3 times by the 5th
+    px, tv = _panel(n_days=1700, n_syms=96, groups=8)
+    late = [c for i, c in enumerate(px.columns) if i % 8 == 0]
+    px.loc[px.index[:150], late] = np.nan  # < 220 observations in the first formation's window
+    monkeypatch.setattr(ci, "CLUSTER_K", 8)
+    out = ci.build_peers(*_inputs(px, tv), COST)
+    assert len(out) == 8  # all eight groups form, including the late-joining one
+    first = px.index[ci.WARMUP + 4 * ci.REBAL + 1]
+    n_at_first = sum(n for pts in out.values() for d, _, n in pts if d == first)
+    assert n_at_first == 96  # the late group (seen in 3 of 4 formations) is already included in the first peer formation
