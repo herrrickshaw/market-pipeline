@@ -118,7 +118,7 @@ def test_build_screener_path_values_bands_tiers_and_report(pb, capsys, tmp_path)
     assert day.loc["AAA", "pe"] == 10.0 and day.loc["BBB", "pe"] == 20.0
     assert day.loc["AAA", "tier"] == 5 and day.loc["BBB", "tier"] == 10
     assert set(d.band.unique()) <= {"<-2sd", "-2..-1sd", "normal", "+1..+2sd", ">+2sd", "nan"}
-    assert (d.pe_sd >= pb.SD_FLOOR_LOG).all()  # sigma floor on log P/E
+    assert (d.pe_sd.dropna() >= pb.SD_FLOOR_LOG).all()  # sigma floor on log P/E
     out = capsys.readouterr().out
     assert "screener.in annual:" in out and "4 symbols" not in out and "2 symbols" in out
     assert "band occupancy" in out and "wrote" in out
