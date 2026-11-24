@@ -675,3 +675,10 @@ def test_main_progress_bars_when_tqdm_available(us, monkeypatch):
     assert [b.kw["desc"] for b in bars] == ["Darvas", "Fundamentals"]
     assert all(b.closed for b in bars) and bars[0].kw["total"] == 3 and bars[1].n == 3
     assert sorted(calls["fund"]) == ["AAA", "BBB", "CCC"]
+
+
+def test_piotroski_equal_roa_is_not_improving(us):
+    t = _good_t()
+    t.income_stmt.loc["Net Income"] = [20, 20]
+    t.balance_sheet.loc["Total Assets"] = [100, 100]
+    assert us.run_piotroski(t)["components"]["F3"] == 0

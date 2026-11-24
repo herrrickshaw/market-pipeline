@@ -117,7 +117,7 @@ def test_build_screener_path_values_bands_tiers_and_report(pb, capsys, tmp_path)
     day = d[d.obs_date == pd.Timestamp("2019-01-02")].set_index("symbol")
     assert day.loc["AAA", "pe"] == 10.0 and day.loc["BBB", "pe"] == 20.0
     assert day.loc["AAA", "tier"] == 5 and day.loc["BBB", "tier"] == 10
-    assert set(d.band.unique()) <= {"<-2sd", "-2..-1sd", "normal", "+1..+2sd", ">+2sd", "nan"}
+    assert set(map(str, d.band.unique())) <= {"<-2sd", "-2..-1sd", "normal", "+1..+2sd", ">+2sd", "nan"}  # NaN renders as nan
     assert (d.pe_sd.dropna() >= pb.SD_FLOOR_LOG).all()  # sigma floor on log P/E
     out = capsys.readouterr().out
     assert "screener.in annual:" in out and "4 symbols" not in out and "2 symbols" in out
@@ -320,3 +320,47 @@ def test_main_dispatch(pb, monkeypatch, capsys):
     # build wins over the other flags
     monkeypatch.setattr(sys, "argv", ["pe_bands.py", "--build", "--extremes"])
     assert pb.main() == 11
+
+
+# ------------------------------------------------------------------ mutation follow-ups
+def test_bands_assign_2sd_and_beyond(pb):
+    # flat EPS keeps sigma at its 0.15 floor, so z = ln(price move) / 0.15
+    _write_screener(pb, _annual("UP", [10.0] * 8) + _annual("DOWN", [10.0] * 8))
+    px = _prices(["UP", "DOWN"])
+    px.loc[px.index >= "2025-06-02", "UP"] = 140.0  # z = ln(1.4)/0.15 = +2.24
+    px.loc[px.index >= "2025-06-02", "DOWN"] = 70.0  # z = ln(0.7)/0.15 = -2.38
+    pb.P.px = px
+    pb.build(types.SimpleNamespace(source="screener"))
+    d = pb.pgc.writes[0][2].set_index(["symbol", "obs_date"])
+    last = pd.Timestamp("2025-12-31")
+    assert d.loc[("UP", last), "pe_z"] == pytest.approx(np.log(1.4) / 0.15, rel=1e-6) and d.loc[("UP", last), "band"] == ">+2sd"
+    assert d.loc[("DOWN", last), "band"] == "<-2sd"
+
+
+def test_tiers_round_up_and_three_stocks_split_into_deciles(pb):
+    _write_screener(pb, _annual("A", [10.0] * 8) + _annual("B", [5.0] * 8) + _annual("C", [2.0] * 8))
+    pb.P.px = _prices(["A", "B", "C"])
+    pb.build(types.SimpleNamespace(source="screener"))
+    d = pb.pgc.writes[0][2]
+    day = d[d.obs_date == pd.Timestamp("2025-12-31")].set_index("symbol")
+    assert (day.loc["A", "pe"], day.loc["B", "pe"], day.loc["C", "pe"]) == (10.0, 20.0, 50.0)
+    assert (day.loc["A", "tier"], day.loc["B", "tier"], day.loc["C", "tier"]) == (4, 7, 10)  # ceil(3.33), ceil(6.67), 10
+
+
+def test_xbrl_keeps_a_symbol_with_exactly_min_quarters_and_wider_quarter_spacing(pb, monkeypatch):
+    # 11 quarters -> exactly 8 TTM observations (MIN_Q); spacing of 97 days keeps each 4-quarter span at 291 days
+    pe_ = pd.to_datetime("2017-03-31") + pd.to_timedelta(np.arange(11) * 97, unit="D")
+    q = pd.DataFrame({"symbol": "AAA", "period_end": pe_, "filing_date": pe_ + pd.Timedelta(days=45), "eps": 2.0})
+    _patch_read_sql(monkeypatch, [("india_quarterly", q)])
+    pb.P.px = _prices(["AAA"])
+    assert pb.build(types.SimpleNamespace(source="xbrl")) == 0
+    assert set(pb.pgc.writes[0][2].ttm_eps.dropna()) == {8.0}
+
+
+def test_accuracy_section_ignores_non_positive_reference_pe(pb, monkeypatch, tmp_path):
+    d = _d_frame()
+    ref = pd.DataFrame({"symbol": [f"S{s}" for s in range(40)],
+                        "pe_ref": [-1.0] * 15 + [10.0 + s for s in range(15, 40)]})  # only 25 usable references
+    _patch_read_sql(monkeypatch, [("fundamentals.ratios", ref)])
+    pb._write_report("e", d, pb.pgc.conn)
+    assert "Accuracy vs" not in (tmp_path / "reports" / "pe_bands_e.md").read_text()

@@ -541,3 +541,67 @@ def test_fetch_fred_failures_are_isolated(yc, monkeypatch, capsys):
     monkeypatch.setattr(requests, "get", lambda url, timeout=None: (_ for _ in ()).throw(OSError("all down")))
     yc.fetch()
     assert not yc.GROWTH.exists()
+
+
+# ------------------------------------------------------------------ mutation follow-ups
+def test_episode_threshold_is_the_95th_percentile(yc):
+    d = _d(n=400)
+    d["jpy"] = np.linspace(0.0, 0.01, len(d))  # w5 rises steadily so every percentile is distinct
+    w5 = d["jpy"].rolling(5).sum()
+    thr, onset, peak, eps = yc._episodes(d)
+    assert thr == pytest.approx(w5.quantile(0.95))
+    assert sum(len(e) for e in eps) == int((w5 > thr).sum())  # about 5% of days are crossings
+
+
+def test_validate_counts_an_episode_that_starts_on_the_target_day(yc):
+    d = _aug24_frame(spike=False)
+    d["jpy"] = 0.0
+    d.loc["2024-08-05", "jpy"] = 0.2  # the only crossing starts exactly on 5 Aug 2024
+    eps = yc._episodes(d)[3]
+    assert eps[0][0] == pd.Timestamp("2024-08-05")
+    out = []
+    yc.run_validate(d, out, eps)
+    assert "**flagged: YES**" in "\n".join(out)
+
+
+def _carry_world(yc, n=900):
+    d = _d(n=n, seed=5)
+    _write_rates(yc, d, slope=-0.002)
+    _write_growth(yc, d)
+    return d
+
+
+def test_carry_compression_filter_uses_the_bottom_decile(yc):
+    d = _carry_world(yc)
+    out = []
+    yc.run_carry(d, out)
+    us = pd.read_parquet(yc.YIELDS).set_index("Date")["3 Mo"]
+    jp = pd.read_parquet(yc.JPR).set_index("Date")["jp3m"]
+    diff = (us.reindex(d.index).ffill() - jp.reindex(d.index).ffill()).dropna()
+    comp = diff.diff(63)
+    f63 = yc._fwd(d["spx_ret"], 63).reindex(diff.index)
+    expected = f63[comp < comp.quantile(0.10)].mean()
+    assert f"mean fwd 63d S&P **{expected*100:+.2f}%** vs unconditional {f63.mean()*100:+.2f}%" in "\n".join(out)
+
+
+def test_growth_double_sort_counts_use_or_for_deterioration(yc):
+    d = _carry_world(yc)
+    out = []
+    yc.run_growth(d, out)
+    text = "\n".join(out)
+    g = pd.read_parquet(yc.GROWTH).set_index("Date").sort_index()
+    us = pd.read_parquet(yc.YIELDS).set_index("Date")["3 Mo"]
+    jp = pd.read_parquet(yc.JPR).set_index("Date")["jp3m"]
+    x = pd.DataFrame(index=d.index)
+    x["comp"] = (us.reindex(d.index).ffill() - jp.reindex(d.index).ffill()).diff(63)
+    x["fwd63"] = yc._fwd(d["spx_ret"], 63)
+    for c in g.columns:
+        x[c] = g[c].reindex(g.index.union(d.index)).ffill().reindex(d.index)
+    x["sahm"] = x["UNRATE"].rolling(63).mean() - x["UNRATE"].rolling(252).min()
+    x["claims_up"] = x["ICSA"] / x["ICSA"].rolling(252).mean() - 1.0
+    t = x.dropna(subset=["comp", "fwd63", "sahm", "claims_up"])
+    det = (t["sahm"] > 0.20) | (t["claims_up"] > 0.10)
+    comp_thr = t["comp"].quantile(0.10)
+    n_det_comp = int((det & (t["comp"] < comp_thr)).sum())
+    assert f"| deteriorating | COMPRESSING | {n_det_comp:,} |" in text
+    assert f"({det.mean()*100:.0f}% of days)" in text

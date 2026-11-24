@@ -546,3 +546,11 @@ def test_production_full_main_end_to_end(pf, monkeypatch, capsys):
     m = js["metadata"]
     assert m["symbols_requested"] == 3 and m["symbols_extracted"] == 2 and m["batch_count"] == 2 and m["total_records"] == 2
     assert m["success_rate_pct"] == pytest.approx(200 / 3) and sorted(d["symbol"] for d in js["data"]) == ["AAA", "BBB"]
+
+
+# ------------------------------------------------------------------ mutation follow-ups
+def test_screener_load_symbols_exactly_2000_needs_no_fallback(scr):
+    csv = scr.home / "market-pipeline" / "code" / "python_files" / "data" / "nse_equity_list.csv"
+    _write(csv, "SYMBOL,NAME\n" + "\n".join(f"N{i},x" for i in range(2000)) + "\n")
+    syms = scr.load_india_symbols()
+    assert len(syms) == 2000 and "RELIANCE" not in syms

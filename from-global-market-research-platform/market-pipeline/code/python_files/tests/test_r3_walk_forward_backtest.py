@@ -1289,3 +1289,116 @@ def test_main_filing_worker_exception_is_isolated(wf, monkeypatch):
     monkeypatch.setattr(wf, "compute_filing_trend", flaky)
     res = wf.main(periods=["3y"], run_filings=True, workers=2)
     assert sorted(res["filing"]["symbol"]) == ["T0", "T2", "T3"]
+
+
+# ------------------------------------------------------------------ mutation follow-ups
+def test_regime_boundaries_are_exact(wf):
+    d = pd.Timestamp("2020-03-02")
+    assert wf.classify_regime(d, _index_df(close=101.5, dma=100, slope=1)) == "BULL"  # exactly 1.5% above: trend wins
+    assert wf.classify_regime(d, _index_df(close=98.5, dma=100, slope=-1)) == "BEAR"
+    assert wf.classify_regime(d, _index_df(close=90, dma=100, slope=0)) == "SIDEWAYS"  # below the DMA but flat slope
+
+
+def test_darvas_equal_volume_and_prior_close_at_box_top_still_signal(wf):
+    df = _darvas_df(second=False)
+    df.iloc[35, df.columns.get_loc("Volume")] = 100 * 1.1  # exactly the 1.1x threshold: >= passes
+    assert [s["idx"] for s in wf.darvas_signals(df)] == [35]
+    df = _darvas_df(second=False)
+    df.iloc[34, df.columns.get_loc("Close")] = 12.0  # prior close equal to the box top still counts as "below or at"
+    assert [s["idx"] for s in wf.darvas_signals(df)] == [35]
+
+
+def test_golden_cross_needs_strict_inversion_and_205_bars(wf):
+    close = np.concatenate([np.full(250, 100.0), [300.0]])  # DMAs are exactly equal the bar before the jump
+    df = _ohlc(len(close))
+    df["Close"] = close
+    assert wf.golden_cross_signals(df) == []
+    close = np.concatenate([np.linspace(100, 90, 200), [200, 300, 400, 500]])  # a real cross at bar 201, 204 bars
+    df = _ohlc(204)
+    df["Close"] = close
+    assert wf.golden_cross_signals(df) == []  # too short: needs 205 bars
+    df = _ohlc(205)
+    df["Close"] = np.concatenate([close, [500.0]])
+    assert [s["idx"] for s in wf.golden_cross_signals(df)] == [201]
+
+
+def test_magic_formula_roic_bar_is_15_not_25(wf, monkeypatch):
+    cr = 1e7
+    inc = _fin({"EBIT": [30 * cr] * 4, "Net Income": [10 * cr] * 4}, FY)  # ROIC 30/150 = 20%
+    bal = _fin({"Total Assets": [200 * cr] * 4, "Current Liabilities": [50 * cr] * 4}, FY)
+    info = {"totalDebt": 100 * cr, "totalCash": 50 * cr, "bookValue": 10}
+    monkeypatch.setattr(wf.yf, "Ticker", lambda t: _tk(inc, bal, None, None, info, 100.5 * cr))
+    assert len(wf.fundamental_signals("ACME", ".NS", "magic_formula", _wf_ohlc())) == 3
+
+
+def test_fiscal_year_ending_in_july_signals_same_year(wf, monkeypatch):
+    inc, bal, cf = _piotroski_statements(True)
+    jul = ["2024-07-31", "2023-07-31", "2022-07-31", "2021-07-31"]
+    for df in (inc, bal, cf):
+        df.columns = pd.to_datetime(jul)
+    monkeypatch.setattr(wf.yf, "Ticker", lambda t: _tk(inc, bal, cf))
+    sigs = wf.fundamental_signals("ACME", ".NS", "piotroski", _wf_ohlc())
+    assert sigs[0]["date"] == pd.Timestamp("2024-07-01")  # month 7 is NOT 'after July'
+
+
+def test_entry_bar_needs_five_prior_bars(wf, monkeypatch):
+    inc, bal, cf = _piotroski_statements(True)
+    for df in (inc, bal, cf):
+        df.columns = pd.to_datetime(["2024-03-31", "2023-03-31", "2022-03-31", "2021-03-31"])
+    monkeypatch.setattr(wf.yf, "Ticker", lambda t: _tk(inc, bal, cf))
+    ohlc = _ohlc(200, start="2024-06-25")  # 1 Jul 2024 is bar 4 of this history
+    assert wf.fundamental_signals("ACME", ".NS", "piotroski", ohlc) == []
+    ohlc = _ohlc(200, start="2024-06-24")  # bar 5: accepted
+    assert [s["idx"] for s in wf.fundamental_signals("ACME", ".NS", "piotroski", ohlc)] == [5]
+
+
+def test_only_available_annual_columns_are_tried(wf, monkeypatch):
+    inc, bal = _coffee_statements()
+    inc, bal = inc.iloc[:, :3], bal.iloc[:, :3]  # three fiscal years -> offsets 0 and 1 only
+    monkeypatch.setattr(wf.yf, "Ticker", lambda t: _tk(inc, bal, None, None, {"debtToEquity": 50}, 5e9))
+    assert [s["col_offset"] for s in wf.fundamental_signals("ACME", ".NS", "coffee_can", _wf_ohlc())] == [0, 1]
+
+
+def test_filing_trend_streak_window_is_six_quarters(wf, monkeypatch):
+    cols = pd.date_range("2025-03-31", periods=12, freq="-3ME")
+    rev = [800.0] * 4 + [400.0] * 4 + [200.0] * 4  # every quarter doubles its year-ago level
+    q = pd.DataFrame({"Total Revenue": rev, "Net Income": rev}).T.set_axis(cols, axis=1)
+    r = _ft(wf, monkeypatch, q)
+    assert r["rev_streak"] == 6 and r["profit_streak"] == 6  # min(6, 12 - 4) = 6 comparisons, score caps at 3 each
+    assert r["filing_score"] == 6
+
+
+def test_overfit_risk_band_edges_are_exclusive(wf):
+    rows = [_stats_row("TRAIN", 5.0), _stats_row("VAL", 4.0)]  # decay is exactly 20.0
+    assert wf.overfitting_report(pd.DataFrame(rows)).iloc[0]["Overfit_Risk"] == "LOW"
+    rows = [_stats_row("TRAIN", 2.0), _stats_row("VAL", 1.0)]  # decay exactly 50.0
+    assert wf.overfitting_report(pd.DataFrame(rows)).iloc[0]["Overfit_Risk"] == "MEDIUM"
+
+
+def test_run_period_window_and_history_minimums(wf, monkeypatch):
+    monkeypatch.setattr(wf, "fundamental_signals", lambda *a, **k: [])
+    idx_df = _index_df(n=400, start="2019-06-03", close=110.0)
+
+    def run(n):
+        df = _darvas_df(n=n, second=False)
+        cfg = {"label": "L", "start": str(df.index[0].date()), "test_start": str(df.index[20].date()),
+               "val_start": str(df.index[30].date()), "val_end": str(df.index[-1].date())}
+        return wf.run_period(cfg, {"AAA.NS": df}, idx_df, [], {}, 1, False)
+
+    assert run(49).empty  # fewer than 50 bars in the window: skipped
+    assert list(run(50)["symbol"]) == ["AAA"]
+    calls = []
+    monkeypatch.setattr(wf, "fundamental_signals", lambda *a, **k: calls.append(1) or [])
+    for n, expected in ((19, 0), (20, 4)):
+        calls.clear()
+        df = _ohlc(n, start="2020-01-01")
+        cfg = {"label": "L", "start": "2020-01-01", "test_start": "2020-02-01", "val_start": "2020-03-01", "val_end": "2020-12-31"}
+        wf.run_period(cfg, {"AAA.NS": df}, idx_df, [("AAA", ".NS")], {}, 1, False)
+        assert len(calls) == expected  # 4 fundamental screeners, only for >= 20 bars
+
+
+def test_fetch_ohlc_bulk_batches_five_year_downloads_by_100(wf, monkeypatch):
+    seen = []
+    monkeypatch.setattr(wf.yf, "download", lambda batch, **k: seen.append(len(batch)) or pd.DataFrame())
+    wf.fetch_ohlc_bulk([f"T{i}.NS" for i in range(250)], period="5y")
+    assert seen == [100, 100, 50]

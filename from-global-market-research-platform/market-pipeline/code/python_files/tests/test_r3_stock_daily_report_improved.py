@@ -934,3 +934,53 @@ def test_run_scans_only(sd, monkeypatch, capsys):
     assert out["darvas"]["signal"] == "BREAKOUT_BUY"
     text = capsys.readouterr().out
     assert "SCANS — TCS" in text and "DARVAS BOX SCAN" in text and "COFFEE CAN" in text
+
+
+# ------------------------------------------------------------------ mutation follow-ups
+def test_darvas_bottom_needs_strictly_higher_lows(sd):
+    lows = [8.0] * 25
+    lows[14] = 5.0  # flat 8s, then a single dip: only the dip is followed by three strictly higher lows
+    r = sd.compute_darvas_box(_box_df(9.0, lows=lows))
+    assert r["box_bottom"] == 5.0 and r["box_top"] == 20.0
+
+
+def test_darvas_current_bar_cannot_confirm_box_top_or_pull_bottom(sd):
+    n = 25
+    highs = [10.0] * n
+    highs[21] = 20.0  # only 2 historical bars follow it; the current bar would make it the 3rd
+    df = pd.DataFrame({"High": highs, "Low": [8.0] * n, "Close": [9.0] * n})
+    assert sd.compute_darvas_box(df)["signal"] == "NO_BOX"
+    # flat lows -> bottom is the minimum of the HISTORICAL segment; the current low (3) is ignored
+    df = _box_df(9.0, lows=[8.0] * 24 + [3.0])
+    r = sd.compute_darvas_box(df)
+    assert r["box_bottom"] == 8.0 and r["signal"] == "IN_BOX"
+
+
+def test_piotroski_equal_roa_is_not_an_improvement_and_seven_is_strong(sd, monkeypatch):
+    inc, bal, cf = _good_piotroski()
+    inc.loc["Net Income"] = [20, 20]
+    bal.loc["Total Assets"] = [100, 100]
+    _install_ticker(sd, monkeypatch, inc, bal, cf, {})
+    assert sd.compute_piotroski_score("A")["component_scores"]["F3_ROA_improving"] == 0
+    inc, bal, cf = _good_piotroski()
+    inc.loc["Gross Profit"] = [30, 80]
+    inc.loc["Total Revenue"] = [100, 200]  # F8 and F9 fail -> exactly 7
+    _install_ticker(sd, monkeypatch, inc, bal, cf, {})
+    r = sd.compute_piotroski_score("A")
+    assert r["f_score"] == 7 and r["interpretation"].startswith("STRONG")
+
+
+def test_coffee_can_roce_exactly_15_fails_and_zero_profit_counts_as_loss(sd, monkeypatch):
+    cols = pd.to_datetime(["2025-03-31", "2024-03-31", "2023-03-31", "2022-03-31"])
+    inc = pd.DataFrame({"Total Revenue": [200, 150, 120, 100], "EBIT": [15, 15, 15, 15],
+                        "Net Income": [30, 20, 0, 12]}).T.set_axis(cols, axis=1)
+    bal = pd.DataFrame({"Total Assets": [200, 200, 200, 200], "Current Liabilities": [100, 100, 100, 100]}).T.set_axis(cols, axis=1)
+    _install_ticker(sd, monkeypatch, inc, bal, None, {"debtToEquity": 50, "marketCap": 6e9})
+    r = sd.compute_coffee_can("ACME")
+    assert r["details"]["ROCE_avg_%"] == 15.0 and r["criteria"]["C2_ROCE_gt15"] == 0  # must be strictly above 15
+    assert r["details"]["Loss_years"] == 1  # a zero-profit year is a loss year
+
+
+def test_historical_summary_with_a_single_close_is_insufficient(sd, capsys):
+    sd.display_historical_summary([{"close": 10}])
+    assert "Insufficient closing-price data." in capsys.readouterr().out

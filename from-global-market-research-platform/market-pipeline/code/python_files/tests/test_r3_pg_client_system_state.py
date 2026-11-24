@@ -106,6 +106,13 @@ def test_to_rows_converts_numpy_and_missing(pg):
     assert mod.to_rows(df.iloc[0:0], ["i"]) == []
 
 
+def test_to_rows_converts_boxed_numpy_bool_in_object_columns(pg):
+    mod, _ = pg
+    df = pd.DataFrame({"b": pd.Series([np.True_, np.False_], dtype=object)})
+    rows = mod.to_rows(df, ["b"])
+    assert rows == [(True,), (False,)] and all(type(r[0]) is bool for r in rows)
+
+
 def test_ensure_schema(pg):
     mod, ps = pg
     mod.ensure_schema(["CREATE X"])  # not connected: no-op, must not raise
@@ -286,7 +293,7 @@ def test_list_data_sources_filters_by_kind(ss, monkeypatch):
     out = ss.list_data_sources(kind="postgres_table")
     assert out == [dict(zip(cols, rows[0]))]
     sql, params = stub.conn.log[-1]
-    assert "WHERE kind = %s" in sql and params == ("postgres_table",)
+    assert "WHERE kind = %s" in sql and params == ("postgres_table",) and sql.endswith("ORDER BY source_key")
     ss.list_data_sources()
     sql, params = stub.conn.log[-1]
     assert "WHERE" not in sql and "ORDER BY source_key" in sql and params is None
@@ -316,6 +323,8 @@ def test_record_data_snapshot_json_and_rollback(ss, monkeypatch):
     assert params == ("ds", "ok", 5, 99.5, 2, '{"a": 1}')
     ss.record_data_snapshot("ds", "ok")
     assert stub.conn.log[-1][1] == ("ds", "ok", None, None, None, None)
+    ss.record_data_snapshot("ds", "ok", detail={})  # an empty dict is still a value, only None is "no detail"
+    assert stub.conn.log[-1][1][5] == "{}"
     stub = _use(ss, monkeypatch, lambda sql, p: RuntimeError("x") if "INSERT" in sql else None)
     ss.record_data_snapshot("ds", "ok")
     assert stub.conn.rollbacks == 1
@@ -347,6 +356,7 @@ def test_record_and_read_analysis_runs(ss, monkeypatch):
     assert stub.conn.log[-1][1] == ("a", 3) and "WHERE analysis_key = %s" in stub.conn.log[-1][0]
     ss.latest_analysis_runs()
     assert stub.conn.log[-1][1] == (20,) and "WHERE" not in stub.conn.log[-1][0]
+    assert stub.conn.log[-1][0].endswith("ORDER BY run_at DESC LIMIT %s")
     stub = _use(ss, monkeypatch, lambda sql, p: RuntimeError("x") if "INSERT" in sql else None)
     ss.record_analysis_run("a", "ok")
     assert stub.conn.rollbacks == 1
@@ -519,3 +529,15 @@ def test_main_cli(ss, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["system_state.py", "--check-connections"])
     ss.main()
     assert "postgres:  UNAVAILABLE — down" in capsys.readouterr().out
+
+
+def test_print_status_truncates_after_exactly_twenty_rows(ss, monkeypatch, capsys):
+    monkeypatch.setattr(ss, "get_state", lambda c, k=None: [{"i": i} for i in range(21)])
+    monkeypatch.setattr(ss, "etl_registry_summary", lambda: None)
+    ss._print_status("data", False)
+    out = capsys.readouterr().out
+    assert "… 1 more" in out and out.count("{'i':") == 20
+    monkeypatch.setattr(ss, "get_state", lambda c, k=None: [{"i": i} for i in range(20)])
+    ss._print_status("data", False)
+    out = capsys.readouterr().out
+    assert "more" not in out and out.count("{'i':") == 20

@@ -543,3 +543,27 @@ def test_main_json_and_markdown(cg, monkeypatch, capsys, tmp_path):
     assert f"wrote {cg.OUT_MD}" in out and "# Completeness audit" in out
     text = cg.OUT_MD.read_text()
     assert "- 🔴 from inventory" in text and text.startswith("# Completeness audit")
+
+
+# ------------------------------------------------------------------ mutation follow-ups
+def test_audit_claims_reads_the_first_4000_chars(cg, tmp_path):
+    cg.SCHEDULED[:] = [("deep.py", None)]
+    (tmp_path / "deep.py").write_text("x = 1\n" + "#" * 3500 + "\n# claim +9.99%\n")  # quote sits beyond char 3000
+    out = cg.audit_claims({})["claims"][0]
+    assert out["claims_in_docstring"] == ["+9.99%"] and out["verdict"] == "UNSOURCED"
+
+
+def test_audit_cassandra_imputed_note_needs_measured_below_ten_percent(cg, monkeypatch):
+    data = {"us": {"total": 1000, "cols": {"cmp": 900, "pe": 800}, "imputed": 900,  # measured = exactly 10%
+                   "vals": {}},
+            "japan": {"total": 1000, "cols": {"cmp": 900, "pe": 800}, "imputed": 901, "vals": {}}}
+    _install_cassandra(monkeypatch, FakeSession(data))
+    notes = "\n".join(cg.audit_cassandra({})["notes"])
+    assert "cassandra[us]" not in notes and "cassandra[japan]: fund_pct reports 80%" in notes
+
+
+def test_render_marks_exactly_five_percent_as_present(cg):
+    s = _state(summary="S", cassandra=[{"market": "us", "rows": 100, "price": 100, "fund": 5, "fund_pct": 0.05,
+                                        "measured": 5, "measured_pct": 0.05}])
+    line = next(ln for ln in cg.render(s).splitlines() if ln.startswith("| us |"))
+    assert line.endswith("| fundamentals present |")

@@ -895,3 +895,10 @@ def test_us_run_batch(us, monkeypatch, capsys):
     monkeypatch.setattr(us, "run", lambda s, **k: seen.append(s) or _us_result(s))
     us.run_batch()
     assert seen == us.DOW_JONES_30
+
+
+def test_us_coffee_can_roe_exactly_15_fails_and_zero_equity_is_skipped(us):
+    r = us.compute_coffee_can(_cc_ticker(ni=(30, 30, 30, 30), eq=(200, 200, 200, 200)), "A")
+    assert r["details"]["ROE_avg_%"] == 15.0 and r["criteria"]["C2_ROE_gt15"] == 0
+    r = us.compute_coffee_can(_cc_ticker(ni=(60, 45, 30, 20), eq=(0, 180, 160, 140)), "A")  # zero equity must not divide
+    assert r["details"]["ROE_min_%"] == round(min([45 / 180, 30 / 160, 20 / 140]) * 100, 2)

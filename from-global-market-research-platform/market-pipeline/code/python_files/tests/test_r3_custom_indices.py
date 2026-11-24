@@ -398,3 +398,71 @@ def test_main_dispatch(ci, monkeypatch):
     assert ci.main() == ("status", True)
     monkeypatch.setattr(sys, "argv", ["custom_indices.py"])
     assert ci.main() == ("status", False)  # default is the read-only status view
+
+
+# ------------------------------------------------------------------ mutation follow-ups
+def test_build_themes_keeps_blocks_with_exactly_three_live_names(ci):
+    names = ["BALRAMCHIN", "TRIVENI", "PRAJIND", "DWARKESH", "BAJAJHIND"]
+    px, tv = _panel(n_days=700, names=names, groups=2)
+    px.loc[px.index[:300], ["DWARKESH", "BAJAJHIND"]] = np.nan  # three live names at the first rebalance
+    pts = ci.build_themes(*_inputs(px, tv), COST)["ETHANOL"]
+    assert pts[0][0] == px.index[ci.WARMUP + 1] and pts[0][2] == 3
+
+
+def test_build_core_requires_sixty_band_members_exactly(ci, monkeypatch):
+    px, tv = _panel(n_days=700, n_syms=100, groups=5)
+    _install_build_deps(monkeypatch, px, tv)
+    _stub_builders(ci, monkeypatch)
+    monkeypatch.setattr(ci, "BAND_LO", 10)
+    monkeypatch.setattr(ci, "BAND_HI", 70)  # exactly 60 names
+    monkeypatch.setattr(ci, "build_themes", lambda *a: {"ETHANOL": [(pd.Timestamp("2020-01-02"), 1000.0, 5)]})
+    ci.build(types.SimpleNamespace())
+    args = [c for c in ci.pgc.calls if c[0] == "dai"][0][1]
+    assert {"SMLEW", "SMLSCR", "SMLEXC"} <= set(pd.DataFrame(args[4], columns=args[5]).index_code)
+
+
+def test_build_treats_unflagged_names_as_excluded(ci, monkeypatch):
+    px, tv = _panel(n_days=700, n_syms=100, groups=5)
+    _install_build_deps(monkeypatch, px, tv)
+    _stub_builders(ci, monkeypatch)
+    monkeypatch.setattr(ci, "BAND_LO", 10)
+    monkeypatch.setattr(ci, "BAND_HI", 90)
+    sys.modules["smallcap_screener"].flags = lambda p, t, i, band: Flags({c: False for c in band[:40]})  # 40 verdicts only
+    ci.build(types.SimpleNamespace())
+    args = [c for c in ci.pgc.calls if c[0] == "dai"][0][1]
+    df = pd.DataFrame(args[4], columns=args[5])
+    n = df.groupby("index_code").n_members.first().to_dict()
+    assert n["SMLSCR"] == 40 and n["SMLEXC"] == 40  # a name with no verdict is excluded, not admitted
+
+
+def test_build_clusters_needs_eighty_names_and_501_points(ci, monkeypatch):
+    px, tv = _panel(n_days=762, n_syms=80, groups=8)  # exactly 80 names and 501 points per code
+    _install_sectors(monkeypatch, list(px.columns), 8)
+    monkeypatch.setattr(ci, "CLUSTER_K", 8)
+    out = ci.build_clusters(*_inputs(px, tv), COST)
+    assert out and all(len(v) == 501 for v in out.values())
+    px, tv = _panel(n_days=761, n_syms=80, groups=8)  # 500 points: not more than 500, dropped
+    assert ci.build_clusters(*_inputs(px, tv), COST) == {}
+    px, tv = _panel(n_days=762, n_syms=79, groups=8)
+    _install_sectors(monkeypatch, list(px.columns), 8)
+    assert ci.build_clusters(*_inputs(px, tv), COST) == {}  # 79 names: below the minimum
+
+
+def test_build_peers_first_group_appears_after_exactly_four_formations(ci, monkeypatch):
+    px, tv = _panel(n_days=1700, n_syms=90, groups=9)
+    monkeypatch.setattr(ci, "CLUSTER_K", 9)
+    out = ci.build_peers(*_inputs(px, tv), COST)
+    first = min(d for pts in out.values() for d, _, _ in pts)
+    assert first == px.index[ci.WARMUP + 4 * ci.REBAL + 1]  # 4 formations of history, groups form at the 5th
+
+
+def test_build_global_trims_history_to_2016_exactly(ci, monkeypatch):
+    idx = pd.bdate_range("2015-06-01", periods=1000)
+    rng = np.random.default_rng(2)
+    frames = {s: pd.Series(50 * np.cumprod(1 + rng.normal(0, 0.01, len(idx))), index=idx) for s in ["CCJ", "LEU", "BWXT"]}
+    mod = types.ModuleType("backtest_tier_anomalies")
+    mod.load_market = lambda m: _long(frames) if m == "US" else pd.DataFrame({"Date": [], "Symbol": [], "Close": []})
+    monkeypatch.setitem(sys.modules, "backtest_tier_anomalies", mod)
+    out = ci.build_global(COST)
+    kept = pd.DatetimeIndex(sorted({d for d in idx if d.year >= 2016}))
+    assert out["NUCLEAR"][0][0] == kept[ci.WARMUP + 1]  # warm-up is counted from the first 2016 bar

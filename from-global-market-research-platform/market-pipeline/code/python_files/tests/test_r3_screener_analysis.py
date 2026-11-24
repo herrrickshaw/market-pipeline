@@ -803,3 +803,41 @@ def test_run_progress_cadence(sa, monkeypatch, capsys):
     sa.run(active_screens={"mf"}, offline=True)
     out = capsys.readouterr().out
     assert "25/50 done" in out and "50/50 done" in out and "10/50 done" not in out
+
+
+# ------------------------------------------------------------------ mutation follow-ups
+def test_golden_cross_requires_a_strict_prior_inversion(sa):
+    close = np.concatenate([np.full(250, 100.0), [200.0]])  # DMAs are exactly equal the bar before the jump
+    r = sa.compute_golden_crossover(_gc_df(close), "X")
+    assert r["dma50_above_200"] is True and r["qualifies"] is False
+
+
+def test_golden_cross_recent_window_edge(sa):
+    close = np.concatenate([np.linspace(100, 60, 250), np.linspace(60, 300, 60)])
+    s50 = pd.Series(close).rolling(50).mean()
+    s200 = pd.Series(close).rolling(200).mean()
+    c = next(i for i in range(1, len(close)) if s50[i - 1] < s200[i - 1] and s50[i] > s200[i])
+    # the last bar still below the 200 DMA must lie within the look-back window (offsets -2 .. -6)
+    assert sa.compute_golden_crossover(_gc_df(close[: c + 5]), "X")["recent_crossover"] is True
+    assert sa.compute_golden_crossover(_gc_df(close[: c + 6]), "X")["recent_crossover"] is False
+
+
+def test_piotroski_equal_share_counts_are_not_dilution(sa, monkeypatch):
+    t = _pio_ticker(True)
+    t.balance_sheet.loc["Share Issued"] = [95, 95]
+    monkeypatch.setattr(sa.yf, "Ticker", lambda s: t)
+    assert sa.compute_piotroski("ACME")["f_score"] == 9
+    t.balance_sheet.loc["Share Issued"] = [96, 95]
+    assert sa.compute_piotroski("ACME")["f_score"] == 8
+
+
+def test_coffee_can_average_roce_must_exceed_15(sa, monkeypatch):
+    cols = pd.to_datetime(["2025-03-31", "2024-03-31", "2023-03-31", "2022-03-31"])
+    t = _cc_ticker()
+    t.income_stmt = pd.DataFrame({"Total Revenue": [200, 150, 120, 100], "EBIT": [15, 15, 15, 15],
+                                  "Net Income": [30, 20, 15, 12]}).T.set_axis(cols, axis=1)
+    t.balance_sheet = pd.DataFrame({"Total Assets": [200] * 4, "Current Liabilities": [100] * 4}).T.set_axis(cols, axis=1)
+    monkeypatch.setattr(sa.yf, "Ticker", lambda s: t)
+    assert sa.compute_coffee_can("ACME")["CC_Criteria"]["C2"] == 0  # exactly 15% is not enough
+    t.income_stmt.loc["EBIT"] = [16, 16, 16, 16]
+    assert sa.compute_coffee_can("ACME")["CC_Criteria"]["C2"] == 1

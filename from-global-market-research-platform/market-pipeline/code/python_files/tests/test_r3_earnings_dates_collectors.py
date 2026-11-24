@@ -947,3 +947,27 @@ def test_yq_main(yq, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["x", "--market", "JP", "--batch-size", "50", "--full-universe", "--batch-delay-seconds", "9"])
     yq.main()
     assert seen == [("JP", 50, True, 9)]
+
+
+# ------------------------------------------------------------------ mutation follow-ups
+def test_bse_cooldown_checkpoint_deduplicates_rows(bse, monkeypatch):
+    monkeypatch.setattr(bse, "CONSECUTIVE_BLOCK_THRESHOLD", 2)
+    monkeypatch.setattr(bse, "BLOCK_COOLDOWN_SECONDS", 1)
+    row = {"scrip_cd": "ok1", "event_date": "d", "event_type": "actual_result", "source": "bse", "headline": "h"}
+    pd.DataFrame([row]).to_parquet(bse.CACHE_PATH, index=False)  # already cached: --force re-fetches it
+
+    def fr(session, scrip):
+        return ([], "invalid_json") if scrip.startswith("b") else ([dict(row)], None)
+
+    monkeypatch.setattr(bse, "fetch_financial_results", fr)
+    bse.fetch_and_cache(["ok1", "b1", "b2"], force=True)
+    assert len(bse._load_cached()) == 1  # the block checkpoint merges and de-duplicates before cooling down
+
+
+def test_yahooquery_does_not_checkpoint_or_sleep_without_a_delay(yq, monkeypatch, tmp_path):
+    (tmp_path / "cache_seed" / "sector_map_cache.json").write_text(json.dumps({f"US:S{i}": "x" for i in range(4)}))
+    sleeps = []
+    monkeypatch.setattr(yq.time, "sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(yq, "fetch_batch", lambda m, b: _batch_rows(b))
+    yq.run_market("US", batch_size=2)
+    assert sleeps == []  # batch_delay_seconds == 0 means no pause at all
